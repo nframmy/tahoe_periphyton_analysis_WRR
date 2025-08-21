@@ -1,0 +1,608 @@
+---
+title: "Tahoe_peri_data_prep_explor_stats"
+output: html_document
+date: "2023-06-19"
+---
+Input data files: cleaned dataset generated in "Tahoe_Peri_data_joining.Rmd" script.
+
+Output data files: Descriptive plots of background conditions measured in the field and exploratory plots of relationships between periphyton metabolism and other variables.
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(ggpubr)
+library(plotly)
+library(reshape2)
+library(DescTools)
+library(arm)
+library(nlme)
+library(lattice)
+library(emmeans)
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+library(patchwork)
+library(gt)
+
+# changing working directory from /scripts to /tahoe_lab_inc_analysis
+knitr::opts_chunk$set(root.dir = '..')
+```
+
+# importing data
+```{r}
+# dataframe with metabolic rate data, but preliminary experiment data is excluded
+dat_clean <- read_csv("data/main_analysis/cleaned_rate_data.csv")
+
+# dataframe with metabolic rate data from all experiments
+dat <- read_csv("data/main_analysis/main_rate_data.csv")
+
+# data
+main_dat <- read_csv("data/main_analysis/main_data_lahontan.csv")
+```
+
+# Plotting main data
+## Comparing AFDW: original vs. corrected
+```{r}
+AFDW_plot <- dat_clean %>%
+  ggplot(aes(x = total_AFDW_g, y = total_AFDW_g_2)) +
+  geom_point() +
+  geom_abline(aes(intercept = 0, slope = 1)) +
+  geom_rug(sides = "bl") +
+  labs(x = "Old AFDW", y = "Corrected AFDW", title = "Comparison of AFDW Data") +
+  lims( x = c(0, 1.5), y = c(0, 1.5)) +
+  theme_classic()
+AFDW_plot
+
+ggsave("plots/main_analysis/AFDW_comparison.png", plot = AFDW_plot, width = 3, height = 3)
+```
+
+## New AFDW-adjusted Metab. rate plot
+### Figure S4
+```{r}
+# remelting dataframe to long format so that metabolic rate columns are combined into one column and values are in a separate column so all can be plotted at once
+dat_long <- dat_clean %>%
+  rename(GPP = GPP_mgO2_d_gAFDW_2, ER = ER_mgO2_d_gAFDW_2, NEP = NEP_mgO2_d_gAFDW_2) %>% # renaming columns so that facet labels are more tidy
+  pivot_longer(cols = c(NEP, GPP, ER),
+               names_to = "rate_name_AFDW",
+               values_to = "rates_AFDW",
+               values_drop_na = TRUE)
+#View(dat_long)
+
+# making experiment ID column a factor instead of numeric since it is treated as discrete rather than continuous in the plot
+dat_long$exp_ID <- as.factor(dat_long$exp_ID)
+
+
+AFDW_2_rates <- dat_long %>%
+  filter(month != "april") %>% 
+  ggplot(aes(x = temp_C, y = rates_AFDW/24, group = interaction(exp_ID, nutrient_trt))) +
+  facet_grid(cols = vars(rate_name_AFDW),
+             rows = vars(nutrient_trt)) +
+  #scale_y_log10() +
+ geom_point(aes(shape = month,
+                #color = nutrient_trt
+                ), size = 1.5) +
+  #geom_smooth(method = "lm", se = FALSE) +
+  #scale_color_viridis_d("Nutrient Treatment") + # renaming label of color legend
+  scale_shape_discrete(name = "Month") +# renaming label of point shape legend
+  #scale_shape_manual(values = c(15:17, 3:5, 8)) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  labs(x = expression('Temperature (\u00B0C)'),
+      y = expression(Rates~(mgO[2]~hr^{-1}~gAFDW^{-1})))
+
+AFDW_2_rates
+
+# high quality dpi plot
+ggsave("plots/main_analysis/correct_AFDW_norm_rates.png", plot = AFDW_2_rates, width = 5, height = 5, dpi = 300)
+
+ggsave("plots/final_paper/FigureS4.jpg", plot = AFDW_2_rates, width = 5, height = 5, dpi = 300)
+
+```
+
+## Plotting Areal Metab. Rates
+```{r}
+# melting dataframe to long format so that metabolic rate columns are combined into one column and values are in a separate column so all can be plotted at once
+dat_long_m2 <- dat_clean %>%
+  rename(GPP = GPP_mgO2_d_m2, ER = ER_mgO2_d_m2, NEP = NEP_mgO2_d_m2) %>% # renaming columns so that facet labels are more tidy
+  pivot_longer(cols = c(NEP, GPP, ER),
+               names_to = "rate_name_m2",
+               values_to = "rates_m2",
+               values_drop_na = TRUE)
+#View(dat_long_m2)
+
+# making experiment ID column a factor instead of numeric since it is treated as discrete rather than continuous in the plot
+dat_long_m2$exp_ID <- as.factor(dat_long_m2$exp_ID)
+
+areal_rates_log_log_AGU <- dat_long_m2 %>%
+  ggplot(aes(x = temp_C, y = rates_m2, group = interaction(exp_ID, nutrients))) +
+  facet_grid(cols = vars(rate_name_m2)) +
+  scale_y_log10() +
+ geom_point(aes(shape = exp_ID, color = nutrient_trt), size = 1.5) +
+  geom_smooth(aes(color = nutrient_trt), method = "lm") +
+  scale_color_viridis_d("Nutrient Treatment") + # renaming label of color legend
+  scale_shape_discrete(name = "Experiment ID") +# renaming label of point shape legend
+  scale_shape_manual(values = c(0:6)) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  labs(x = expression('Temperature (\u00B0C)'),
+      y = expression(Rates~(mgO[2]~day^{-1}~m^{-2})))
+
+areal_rates_log_log_AGU
+
+ggsave("plots/main_analysis/areal_rates_unlogged_AGU.png", plot = areal_rates_log_log_AGU, width = 7, height = 3, dpi = 300)
+
+# same plot, but removing april experiments since they were excluded from models (due to different experimental design)
+
+areal_rates_log_wo_april <- dat_long_m2 %>%
+  filter(month != "april") %>%
+  ggplot(aes(x = temp_C, y = rates_m2, group = interaction(exp_ID, nutrients))) +
+  facet_grid(cols = vars(rate_name_m2)) +
+  scale_y_log10() +
+ geom_point(aes(shape = exp_ID, color = nutrient_trt), size = 1.5) +
+  geom_smooth(aes(color = nutrient_trt), method = "lm") +
+  scale_color_viridis_d("Nutrient Treatment") + # renaming label of color legend
+  scale_shape_manual(name = "Experiment ID", values = c(15:17, 3:5, 8)) + # renaming label of point shape legend
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  labs(x = expression('Temperature (\u00B0C)'),
+      y = expression(Rates~(mgO[2]~day^{-1}~m^{-2})))
+
+areal_rates_log_wo_april
+
+ggsave("plots/main_analysis/areal_rates_unlogged_wo_april.png", plot = areal_rates_log_wo_april, width = 8, height = 3, dpi = 300)
+
+
+
+# same plot, but ungrouping by experiment ID and adding back in april 2021 data
+
+areal_rates <- dat_long_m2 %>%
+  ggplot(aes(x = temp_C, y = rates_m2, group = nutrients)) +
+  facet_grid(cols = vars(rate_name_m2)) +
+  scale_y_log10() +
+ geom_point(aes(color = nutrient_trt), size = 1.5) +
+  geom_smooth(aes(color = nutrient_trt), method = "lm", se = FALSE) +
+  scale_color_viridis_d("Nutrient Treatment") + # renaming label of color legend
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  labs(x = expression('Temperature (\u00B0C)'),
+      y = expression(Rates~(mgO[2]~day^{-1}~m^{-2})))
+
+areal_rates
+
+ggsave("plots/main_analysis/SA_model_output.png", plot = areal_rates, width = 7, height = 3, dpi = 300)
+```
+
+## Chl-a-normalized GPP plot
+```{r}
+# normalizing GPP rates by mass of chla on rocks
+chla_rates <- dat_clean %>%
+  mutate(GPP_mgO2_d_ugChla = GPP_mg_d/(total_chla_ug/1e6)) #converting chla data from ug to g
+
+# making experiment ID column a factor instead of numeric since it is treated as discrete rather than continuous in the plot
+chla_rates$exp_ID <- as.factor(chla_rates$exp_ID)
+
+# now plotting GPP rates vs. temp, and removing april 2021 data
+
+GPP_chla <- chla_rates %>%
+  filter(month != "april") %>%
+  ggplot(aes(x = temp_C, y = GPP_mgO2_d_ugChla, group = interaction(exp_ID, nutrients))) +
+  scale_y_log10() +
+ geom_point(aes(shape = exp_ID, color = nutrient_trt), size = 1.5) +
+  geom_smooth(aes(color = nutrient_trt), method = "lm") +
+  scale_color_viridis_d("Nutrient Treatment") + # renaming label of color legend
+  scale_shape_manual(name = "Experiment ID", values = c(15:17, 3:5, 8)) + # renaming label of point shape legend
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  labs(x = expression('Temperature (\u00B0C)'),
+      y = expression(GPP~(mgO[2]~day^{-1}~gChla^{-1})))
+
+GPP_chla
+
+ggsave("plots/main_analysis/GPP_chla.png", plot = GPP_chla, height = 4, width = 8)
+
+
+```
+
+## Autotrophic Index Seasonal Patterns
+```{r}
+# Using the autotrophic index (ratio of AFDW:chl-a) (Biggs & Close 1989)
+         
+dat %>%
+  group_by(date) %>%
+  summarise(AI_avg = mean(AI), AI_sd = sd(AI)) %>%
+  arrange(AI_avg)
+
+```
+
+# Temperature Randomization Checks
+Checking that randomization of temperature treatments between ambient and enriched nutrient trials did not have any drastic effects on metabolic rates
+```{r}
+temp_diff <- dat_clean %>% 
+  group_by(month, exp_ID, rock_ID) %>% 
+  arrange(month, exp_ID, rock_ID, nutrient_trt) %>% 
+  summarise(temp_difference = temp_C - lag(temp_C),
+            GPP_diff = GPP_mg_d - lag(GPP_mg_d),
+            ER_diff = ER_mgO2_d_m2 - lag(ER_mgO2_d_m2),
+            NEP_diff = NEP_mg_d - lag(NEP_mg_d)) %>% 
+  drop_na() %>% 
+  pivot_longer(GPP_diff:NEP_diff, names_to = "parameter", values_to = "value")
+
+temp_diff %>% 
+  mutate(abs_difference = abs(value)) %>% 
+  ggplot(aes(x = factor(temp_difference), y = value,
+             #col = month
+             ))+
+  facet_wrap(vars(month, parameter),
+             nrow = 5,
+             scales = "free_y")+
+  geom_boxplot()+
+  geom_hline(yintercept = 0, linetype = 3)+
+  theme_bw()+
+  labs(x = "Temperature Difference (C)",
+       y = "Metabolic Rate Absolute Difference")
+```
+
+
+# Exploratory Data Analysis
+```{r}
+# removing data from march experiments since it was at a different site and had excessive variation in AFDW-normalized GPP rates due to a discrepancy in filtering methods
+dat_pnld <- dat %>%
+  filter(month != "march")
+
+# histogram of temperature data to check normality
+dat_pnld %>%
+  ggplot(aes(temp_C)) +
+  geom_histogram()
+# looks approximately like a normal distribution
+
+# now checking normality in AFDW-normalized metabolic rates
+dat_pnld %>%
+  ggplot(aes(GPP_mgO2_d_gAFDW)) +
+  geom_histogram()
+
+dat_pnld %>%
+  ggplot(aes(NEP_mgO2_d_gAFDW)) +
+  geom_histogram()
+
+dat_pnld %>%
+  ggplot(aes(ER_mgO2_d_gAFDW)) +
+  geom_histogram()
+# some definite outliers present, also some potential for a right-skewed distn in the ER and GPP rates.
+
+# cleveland plot
+# dotchart(dat_pnld$)
+
+# selecting only the numeric columns for calculating a correlation matrix
+dat_cor <- dat_pnld %>%
+  dplyr::select(temp_C, GPP_mgO2_d_gAFDW, NEP_mgO2_d_gAFDW, ER_mgO2_d_gAFDW, GPP_mgO2_d_m2, NEP_mgO2_d_m2, ER_mgO2_d_m2, NO3_N_ug_L, NH4_N_ug_L, SRP_ug_L)
+
+# standardizing data with mean = 0, sd = 1 for correlation matrix
+dat_cor <- scale(dat_cor)
+#View(dat_cor)
+
+# plotting correlation matrix of the data
+cor(dat_cor, use = "complete.obs")
+
+```
+
+# Time-series plots
+### chla
+```{r}
+### chlorophyll-a trends across time
+
+# making bounds for x axis in plot below
+min <- as.Date("2021-04-01")
+max <- as.Date("2022-04-01")
+
+
+chla_trends <- dat %>%
+  filter(exp_ID != 1 & exp_ID != 2) %>% # filtering out march 1st and 15th data since they were performed at a different site
+  mutate(chla_g_m2 = total_chla_ug/rock_SA_m2/1e6) %>% # calculating areal chlorophyll-a concentrations (per m2)
+  ggplot(aes(x = date, y = chla_g_m2, group = date)) +
+  geom_boxplot() +
+  labs(x = "", y = expression(Periphyton~Chl-a~(g~m^{-2}))) +
+  scale_x_date(limits = c(min, max)) +
+  theme_classic() +
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+
+chla_trends
+
+# simplified plot w/o expressions for ggplotly
+
+chla_plotly <- dat %>%
+  filter(exp_ID != 1) %>% # filtering out march 1st data due to different chla sampling protocols used for this experiment
+  mutate(chla_g_m2 = total_chla_ug/rock_SA_m2/1e6) %>% # calculating areal chlorophyll-a concentrations (per m2)
+  ggplot(aes(x = date, y = chla_g_m2, group = date)) +
+  geom_boxplot() +
+  theme_classic() +
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+
+p <- plotly::ggplotly(chla_plotly)
+p
+```
+
+### AI
+```{r}
+# plotting changes in AI over the year
+
+AI_trends <- dat %>%
+  filter(exp_ID != 1 & exp_ID != 2) %>% # filtering out march 1st and 15th data since they were performed at a different site
+  filter(AI < 5000) %>% # filtering out 2 outliers from october and march
+  ggplot(aes(x = date, y = AI, group = date)) +
+  geom_boxplot() +
+  labs(x = "", y = "Autotrophic Index (gAFDW:gChla)") +
+  scale_x_date(limits = c(min, max)) +
+  theme_classic() +
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+
+AI_trends
+
+ggsave("plots/main_analysis/AI_timeseries.png", plot = AI_trends, height = 4, width = 8, dpi = 300)
+```
+
+### AFDW
+```{r}
+# plotting changes in areal AFDW over the year
+
+AFDW_trends <- dat %>%
+  filter(exp_ID != 1 & exp_ID != 2) %>% # filtering out march 1st and 15th data since they were performed at a different site
+  mutate(AFDW_g_m2 = total_AFDW_g_2/rock_SA_m2) %>%
+  filter(AFDW_g_m2 <= 200) %>% # filtering out outlier from exp_ID 2
+  ggplot(aes(x = date, y = AFDW_g_m2, group = date)) +
+  geom_boxplot() +
+  labs(x = "", y = expression(Periphyton~AFDW~(g~m^{-2}))) +
+  scale_x_date(limits = c(min, max)) +
+  theme_classic() +
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+
+AFDW_trends
+
+ggsave("plots/main_analysis/AFDW_timeseries.png", plot = AFDW_trends, height = 4, width = 8, dpi = 300)
+
+
+# simplified plot for plotly
+AFDW_plotly <- dat %>%
+  filter(exp_ID != 1) %>% # filtering out march 1st data due to different chla sampling protocols used for this experiment
+  mutate(AFDW_g_m2 = total_AFDW_g_2/rock_SA_m2) %>%
+  filter(AFDW_g_m2 <= 200) %>% # filtering out outlier from exp_ID 2
+  ggplot(aes(x = date, y = AFDW_g_m2, group = date)) +
+  geom_boxplot() +
+  theme_classic()
+
+p <- plotly::ggplotly(AFDW_plotly)
+p
+
+```
+
+### Temp
+#### Figure 2
+```{r}
+# making bounds for x axis in plot below
+min <- as.Date("2021-04-01")
+max <- as.Date("2022-04-01")
+
+# plotting in-situ temps for each experiment
+insitu_temp <- dat %>%
+ filter(exp_ID != 1 & exp_ID != 2) %>% # filtering out march 1st and 15th data since they were performed at a different site
+  filter(exp_ID == 2 & temp_C == 7 | exp_ID == 3 & temp_C == 7 | exp_ID == 4 & temp_C == 7 | exp_ID == 5 & temp_C == 14.5 | exp_ID == 6 & temp_C == 19.5 | exp_ID == 7 & temp_C == 15 | exp_ID == 8 & temp_C == 9.5 | exp_ID == 9 & temp_C == 6) %>% # filtering only data from in-situ temperatures in the field
+  ggplot(aes( x = date, y = temp_C)) +
+  geom_point(size = 3) +
+  geom_line() +
+  labs(y = expression('Temperature (\u00B0C)'), x = "Date") +
+  scale_x_date(date_labels = "%b %Y", limits = c(min, max)) +
+  theme_classic()
+insitu_temp
+
+# patching together AI, AFDW, chl-a, and in situ temp timeseries plots so that they share the same x-axis
+library(patchwork)
+
+AI_AFDW <- (chla_trends/AFDW_trends/AI_trends/insitu_temp) + plot_annotation(tag_levels = 'a')
+
+ggsave("plots/main_analysis/AI_AFDW_trends.jpg", plot = AI_AFDW, height = 11, width = 11, dpi = 300)
+
+ggsave("plots/final_paper/Figure2.jpg", plot = AI_AFDW, height = 10, width = 8, dpi = 300)
+```
+
+
+### P deficiency index (Lean & Pick 1981)
+```{r}
+# calculating phosphorus deficiency index of periphyton as in Lean & Pick 1981 and using this to assess nutrient limitation in periphyton communities
+
+# plotting NEP rates vs. SRP uptake rates to get an idea of the dispersion pattern
+main_dat %>%
+  filter(!is.na(SRP_rate) & SRP_rate <= 200) %>% # filtering out rows with no SRP uptake rate and a few outlier rows
+  ggplot(aes(x = SRP_rate, y = NEP_mgO2_d_gAFDW_2, color = month)) +
+  geom_point() +
+  labs(x = expression(PO[4]~Uptake~(ugP~hr^{-1}~gAFDW^{-1})), y = expression(NEP~(mgO[2]~day^{-1}~gAFDW^{-1})))
+
+# making same plot, but averaging replicates by temperature and month
+
+Pdef_plot <- main_dat %>%
+  filter(!is.na(SRP_rate) & SRP_rate <= 200 & exp_ID >= 4) %>% # filtering out rows with no SRP uptake rate, a few outlier rows, and rows from march 2021 and April 7 2021 experiments
+  group_by(temp_C, date) %>% # grouping dataframe by temperature value and month
+  summarise(month, avgSRP = mean(SRP_rate), lowSRP = mean(SRP_rate) - sd(SRP_rate), upperSRP = mean(SRP_rate) + sd(SRP_rate), avgNEP = mean(NEP_mgO2_d_gAFDW_2), lowNEP = mean(NEP_mgO2_d_gAFDW_2) - sd(NEP_mgO2_d_gAFDW_2), upperNEP = mean(NEP_mgO2_d_gAFDW_2) + sd(NEP_mgO2_d_gAFDW_2)) %>% # calculating average and upper and lower bounds (+- SD) for NEP and SRP uptake rates for each temp treatment and each month
+  ggplot(aes(x = avgSRP, y = avgNEP, color = month)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = lowSRP, xmax = upperSRP)) +
+  geom_errorbar(aes(ymin = lowNEP, ymax = upperNEP)) +
+  labs(x = expression(PO[4]~Uptake~(ugP~hr^{-1}~gAFDW^{-1})), y = expression(NEP~(mgO[2]~day^{-1}~gAFDW^{-1})))
+
+ggsave("plots/main_analysis/pdef_plot.png", plot = Pdef_plot, height = 5, width = 7, dpi = 300)
+
+
+# calculating p deficiency index (optimum photosynthetic rate:maximum phosphate uptake velocity) -- units should cancel
+# using biomass specific rates
+dat_pnld_pdef <- main_dat %>%
+  filter(!is.na(SRP_rate)) %>% # filtering out rows with no SRP uptake rate
+  filter(exp_ID != 1 & exp_ID != 2) %>% # filtering out march 1st and 15th data since they were performed at a different site
+  filter(exp_ID == 2 & temp_C == 7 | exp_ID == 3 & temp_C == 7 | exp_ID == 4 & temp_C == 7 | exp_ID == 5 & temp_C == 14.5 | exp_ID == 6 & temp_C == 19.5 | exp_ID == 7 & temp_C == 15 | exp_ID == 8 & temp_C == 9.5 | exp_ID == 9 & temp_C == 6) %>% # filtering only data from in-situ temperatures in the field
+  mutate(P_def_AFDW = NEP_mgO2_d_gAFDW_2/24 * 1000/SRP_rate) %>% # converting NEP to ug O2 per hour per gram AFDW of periphyton and then dividing by the phosphate uptake rate
+  group_by(date) %>% # grouping the data by date
+  summarise(avg_P_def = mean(P_def_AFDW), lower = mean(P_def_AFDW) - 2 * sd(P_def_AFDW), upper = mean(P_def_AFDW) + 2 * sd(P_def_AFDW))
+#View(dat_pnld_pdef)
+
+
+#################### plotting results
+dat_pnld_pdef %>%
+  filter(!is.na(lower)) %>% # filtering out rows from 3/15 and 4/21 experiments
+  ggplot(aes( x = date, y = avg_P_def)) +
+  geom_point() +
+  geom_line() +
+  geom_errorbar(aes(ymin = lower, ymax = upper)) +
+  labs(x = "Date", y = expression(NEP:P~uptake~(mgO[2]/ugP)))
+
+
+############## plotting p deficiency index vs. temperature
+  main_dat %>%
+  filter(!is.na(SRP_rate)) %>% # filtering out rows with no SRP uptake rate
+  mutate(P_def_AFDW = NEP_mgO2_d_gAFDW_2/24 * 1000/SRP_rate) %>%
+    ggplot(aes(x = temp_C, y = P_def_AFDW)) +
+    geom_point() +
+    labs(x = "Temp (C)", y = expression(NEP:P~uptake~(mgO[2]/ugP)))
+
+
+############## now doing same with areal rates
+dat_pnld_pdef <- main_dat %>%
+  filter(!is.na(SRP_rate)) %>% # filtering out rows with no SRP uptake rate
+  filter(exp_ID != 1 & exp_ID != 2) %>% # filtering out march 1st and 15th data since they were performed at a different site
+  filter(exp_ID == 2 & temp_C == 7 | exp_ID == 3 & temp_C == 7 | exp_ID == 4 & temp_C == 7 | exp_ID == 5 & temp_C == 14.5 | exp_ID == 6 & temp_C == 19.5 | exp_ID == 7 & temp_C == 15 | exp_ID == 8 & temp_C == 9.5 | exp_ID == 9 & temp_C == 6) %>% # filtering only data from in-situ temperatures in the field
+  mutate(P_def_m2 = NEP_mgO2_d_m2/24/SRP_rate) %>% # converting NEP to mg O2 per hour per gram AFDW of periphyton and then dividing by the phosphate uptake rate
+  group_by(date) %>% # grouping the data by date
+  summarise(avg_P_def = mean(P_def_m2), lower = mean(P_def_m2) - 2 * sd(P_def_m2), upper = mean(P_def_m2) + 2 * sd(P_def_m2))
+#View(dat_pnld_pdef)
+
+################ plotting results
+dat_pnld_pdef %>%
+  filter(!is.na(lower)) %>% # filtering out rows from 3/15 and 4/21 experiments
+  ggplot(aes( x = date, y = avg_P_def)) +
+  geom_point() +
+  geom_line() +
+  geom_errorbar(aes(ymin = lower, ymax = upper))
+# units of SRP uptake are per g AFDW of periphyton, not per m2. Thus the P deficiency indices based off areal rates are not comparable to those based off of biomass specific rates and are much higher.
+
+```
+
+All p deficiency index values fall within the extreme P deficiency group as put forth by Pick & Lean 1981.
+
+
+## Control rates across seasons
+### AFDW-normalized
+```{r}
+# daily rates
+metab_trend_AFDW <- dat_long %>%
+  filter(exp_ID == 3 & temp_C ==7 | exp_ID == 5 & temp_C == 14.5 | exp_ID == 6 & temp_C == 19.5 | exp_ID == 7 & temp_C == 15 | exp_ID == 8 & temp_C == 9.5 | exp_ID == 9 & temp_C == 6) %>% # filtering only ambient and in-situ temperature data from all experiments except march one due to different biomass methods giving consistently higher data values
+  ggplot(aes(x = date, y = rates_AFDW, group = date)) +
+  facet_grid(rows = vars(rate_name_AFDW)) +
+  geom_boxplot() +
+  labs(x = "", y = expression(Metabolic~Rate~(mgO[2]~day^{-1}~gAFDW^{-1}))) +
+  theme_bw() +
+  theme(legend.position = "None", strip.text.y = element_text(angle = 0)) # removing legend and making facet labels horizontal
+
+
+metab_trend_AFDW
+
+# hourly rates
+metab_trend_AFDW_hr <- dat_long %>%
+  filter(exp_ID == 3 & temp_C ==7 | exp_ID == 5 & temp_C == 14.5 | exp_ID == 6 & temp_C == 19.5 | exp_ID == 7 & temp_C == 15 | exp_ID == 8 & temp_C == 9.5 | exp_ID == 9 & temp_C == 6) %>% # filtering only ambient and in-situ temperature data from all experiments except march one due to different biomass methods giving consistently higher data values
+  ggplot(aes(x = date, y = rates_AFDW/24, group = date)) +
+  facet_grid(rows = vars(rate_name_AFDW)) +
+  geom_boxplot() +
+  labs(x = "", y = expression(Metabolic~Rate~(mgO[2]~hr^{-1}~gAFDW^{-1}))) +
+  theme_bw() +
+  theme(legend.position = "None", strip.text.y = element_text(angle = 0)) # removing legend and making facet labels horizontal
+
+
+metab_trend_AFDW_hr
+
+
+
+# simplified plot for plotly
+metab_trend_AFDW_plotly <- dat_long %>%
+  filter(exp_ID == 3 & temp_C ==7 | exp_ID == 5 & temp_C == 14.5 | exp_ID == 6 & temp_C == 19.5 | exp_ID == 7 & temp_C == 15 | exp_ID == 8 & temp_C == 9.5 | exp_ID == 9 & temp_C == 6) %>% # filtering only ambient and in-situ temperature data from all experiments except march one due to different biomass methods giving consistently higher data values
+  ggplot(aes(x = date, y = rates_AFDW/24, group = date, fill = rate_name_AFDW)) +
+  facet_grid(rows = vars(rate_name_AFDW)) +
+  geom_boxplot() +
+  scale_fill_viridis_d(name = "Hourly Rates") +
+  theme_bw() +
+  theme(legend.position = "None")
+
+
+p <- plotly::ggplotly(metab_trend_AFDW_plotly)
+p
+
+
+```
+
+### SA normalized
+```{r}
+# daily rates
+metab_trend_sa <- dat_long_m2 %>%
+  filter(exp_ID == 3 & temp_C ==7 | exp_ID == 5 & temp_C == 14.5 | exp_ID == 6 & temp_C == 19.5 | exp_ID == 7 & temp_C == 15 | exp_ID == 8 & temp_C == 9.5 | exp_ID == 9 & temp_C == 6) %>% # filtering only ambient and in-situ temperature data from all experiments except march one due to different biomass methods giving consistenly higher data values
+  ggplot(aes(x = date, y = rates_m2, group = date)) +
+  facet_grid(rows = vars(rate_name_m2)) +
+  geom_boxplot() +
+  labs(x = "", y = expression(Metabolic~Rate~(mgO[2]~day^{-1}~m^{-2})), fill = "Metabolic Rate") +
+  theme_bw() +
+  theme(strip.text.y = element_text(angle = 0))
+
+
+metab_trend_sa
+
+
+# hourly rates
+metab_trend_sa_hr <- dat_long_m2 %>%
+  filter(exp_ID == 3 & temp_C ==7 | exp_ID == 5 & temp_C == 14.5 | exp_ID == 6 & temp_C == 19.5 | exp_ID == 7 & temp_C == 15 | exp_ID == 8 & temp_C == 9.5 | exp_ID == 9 & temp_C == 6) %>% # filtering only ambient and in-situ temperature data from all experiments except march one due to different biomass methods giving consistenly higher data values
+  ggplot(aes(x = date, y = rates_m2/24, group = date)) +
+  facet_grid(rows = vars(rate_name_m2)) +
+  geom_boxplot() +
+  labs(x = "", y = expression(Metabolic~Rate~(mgO[2]~hr^{-1}~m^{-2})), fill = "Metabolic Rate") +
+  theme_bw() +
+  theme(strip.text.y = element_text(angle = 0))
+
+
+metab_trend_sa_hr
+
+
+# simplified plot for plotly
+
+metab_trend_sa_plotly <- dat_long_m2 %>%
+  filter(exp_ID == 3 & temp_C ==7 | exp_ID == 5 & temp_C == 14.5 | exp_ID == 6 & temp_C == 19.5 | exp_ID == 7 & temp_C == 15 | exp_ID == 8 & temp_C == 9.5 | exp_ID == 9 & temp_C == 6) %>% # filtering only ambient and in-situ temperature data from all experiments except march one due to different biomass methods giving consistenly higher data values
+  ggplot(aes(x = date, y = rates_m2/24, group = date, fill = rate_name_m2)) +
+  facet_grid(rows = vars(rate_name_m2)) +
+  geom_boxplot() +
+  scale_fill_viridis_d(name = "hourly rate") +
+  theme_bw()
+ 
+p <- plotly::ggplotly(metab_trend_sa_plotly)
+p
+
+# calculating average areal metabolic rates
+
+control_rates <- dat_long_m2 %>%
+  filter(exp_ID == 3 & temp_C ==7 | exp_ID == 5 & temp_C == 14.5 | exp_ID == 6 & temp_C == 19.5 | exp_ID == 7 & temp_C == 15 | exp_ID == 8 & temp_C == 9.5 | exp_ID == 9 & temp_C == 6) %>% # filtering only ambient and in-situ temperature data from all experiments except march one due to different biomass methods giving consistently higher data values
+  group_by(rate_name_m2) %>%
+  summarise(avg__hourly_rate_m2 = mean(rates_m2)/24)
+#View(control_rates)
+```
+
+### combining AFDW and SA metabolic trend plots
+#### Figure 3
+```{r}
+metab_trend <- (metab_trend_AFDW + metab_trend_sa)
+
+ggsave("plots/main_analysis/metab_trends.jpg", plot = metab_trend, height = 6, width = 12, dpi = 300)
+
+metab_trend_hr <- (metab_trend_AFDW_hr + metab_trend_sa_hr) +
+  plot_annotation(tag_levels = "a")
+
+ggsave("plots/final_paper/Figure3.jpg", plot = metab_trend_hr, height = 6, width = 12, dpi = 300)
+
+```
+
+
+

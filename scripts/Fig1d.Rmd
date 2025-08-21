@@ -1,0 +1,71 @@
+---
+title: "Nearshore Network Analysis"
+author: "Nick Framsted"
+date: "1/5/2021"
+output: pdf_document
+---
+
+```{r, setup, include=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(ggpubr)
+```
+
+
+
+# Loading Data
+```{r}
+# importing dataset for rubicon point (closest site to the pineland site)
+dat_RB <- read_csv("C:/Users/nfram/OneDrive/Nick's Masters Laptop/Tahoe_nearshore_network_data/RB.txt")
+
+# importing data for homewood site (next closest to pineland site)
+dat_HW <- read_csv("C:/Users/nfram/OneDrive/Nick's Masters Laptop/Tahoe_nearshore_network_data/HW.txt")
+
+# # looking at min and max temps for homewood
+# dat_HW %>%
+#   filter(!is.na(T)) %>%
+#   summarise(minT = min(T), max = max(T))
+# 
+# # now looking for dates associated with these min and max temps
+# dat_HW %>%
+#   filter(T == 3.65674 | T == 21.26802)
+```
+
+
+
+# Combining Homewood and Rubicon temp data
+## Figure 1 Inset
+```{r}
+# combining HW and RB dataframes, creating column of abbreviated months
+temp_dat <- union(dat_HW, dat_RB) %>%
+  mutate(Month = month(TimeLocal, label = TRUE, abbr = TRUE))
+
+# making this column class "date"
+temp_dat$TimeLocal <- as.Date(temp_dat$TimeLocal)
+
+
+# making month column a factor and specifying levels to plot by water year (Oct-Oct)
+temp_dat$Month = factor(temp_dat$Month, levels = c("Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep"))
+temp_dat <- temp_dat %>%
+  arrange(Month) %>%
+  mutate(date_order = row_number())
+
+#View(temp_dat)
+
+temp <- temp_dat %>%
+  filter(!is.na(T)) %>%
+  ggplot(aes(x = TimeLocal, y = T)) +
+  geom_point() +
+  geom_smooth() +
+  scale_y_continuous(limits = c(0,24))+
+  scale_x_date(date_breaks = "1 month", date_labels = "%b") +
+  labs(x = "Month", y = expression('Water Temperature (\u00B0C)')) +
+  theme_classic()
+temp
+
+ggsave("plots/nearshore_temp_analysis/HW_RB_combo_temp_plot.jpg", plot = temp, height = 4, width = 6, dpi = 300)
+
+ggsave("plots/final_paper/Figure1_temp_inset.jpg", plot = temp, height = 4, width = 6, dpi = 600)
+```
+

@@ -1,0 +1,25 @@
+jar,treatment,tank,treatment,DO_1_mg_L,DO_2_mg_L,DO_3_mg_L,time,photoperiod,comments
+A22,ambient,1,18,7.25,7.24,7.25,8:43,initial,
+45,enriched,1,18,7.45,7.44,7.43,8:44,initial,
+15,ambient,2,15,7.35,7.35,7.33,8:41,initial,
+13,enriched,2,15,7.44,7.45,7.45,8:40,initial,
+A38,ambient,3,21,7.42,7.42,7.39,8:47,initial,
+28,enriched,3,21,7.51,7.47,7.48,8:47,initial,
+8,ambient,4,24,7.25,7.26,7.26,8:50,initial,
+A5,enriched,4,24,7.43,7.42,7.42,8:50,initial,
+A22,ambient,1,18,7.18,7.16,7.18,9:57,light,
+45,enriched,1,18,7.41,7.4,7.39,9:57,light,
+15,ambient,2,15,7.28,7.28,7.27,10:00,light,
+13,enriched,2,15,7.45,7.44,7.44,10:00,light,
+A38,ambient,3,21,7.26,7.25,7.26,10:03,light,
+28,enriched,3,21,7.35,7.33,7.34,10:03,light,
+8,ambient,4,24,7.25,7.23,7.23,10:06,light,
+A5,enriched,4,24,7.36,7.35,7.33,10:06,light,bubbles present
+A22,ambient,1,18,7.14,7.14,7.13,11:37,dark,
+45,enriched,1,18,7.39,7.4,7.4,11:37,dark,
+15,ambient,2,15,7.35,7.34,7.35,11:40,dark,bubbles present
+13,enriched,2,15,7.46,7.47,7.46,11:41,dark,
+A38,ambient,3,21,7.24,7.23,7.22,11:43,dark,
+28,enriched,3,21,7.36,7.35,7.36,11:44,dark,
+8,ambient,4,24,7.21,7.22,7.21,11:47,dark,
+A5,enriched,4,24,7.3,7.29,7.28,11:48,dark,bubbles present

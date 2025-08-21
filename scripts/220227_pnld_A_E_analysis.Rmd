@@ -1,0 +1,52 @@
+---
+title: "220227_pnld_A_E_analysis"
+author: "Nick Framsted"
+date: "3/14/2022"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(ggpubr)
+library(plotly)
+library(reshape2)
+library(DescTools)
+
+# changing working directory from /scripts to /tahoe_lab_inc_analysis
+knitr::opts_knit$set(root.dir = '..')
+```
+
+# Importing and Processing data
+```{r, include = FALSE}
+# importing and cleaning up metabolism data from both ambient and enriched incubations
+dat_a <- read_csv("data/220227_pineland_a_e/220227_pnld_ambient_rates.csv")
+
+# selecting only the columns that I need
+dat_a <- dat_a %>%
+  dplyr::select(chamber, total_DW_g, total_AFDW_g, rock_SA_m2:nutrient_trt)
+
+dat_e <- read_csv("data/220227_pineland_a_e/220227_pnld_enriched_rates.csv")
+
+# selecting only the columns that I need
+dat_e <- dat_e %>%
+  dplyr::select(chamber, total_DW_g, total_AFDW_g, rock_SA_m2:nutrient_trt)
+
+
+# binding the rows of the two dataframes together
+dat <- bind_rows(dat_a, dat_e)
+# adding in nutrient enriched dummy variable column (0 = ambient, 1 = enriched nutrients)
+dat <- dat %>%
+  mutate(nutrients = ifelse(nutrient_trt == "ambient", 0, 1))
+
+# making ER values positive for subsequent log-transformations
+dat <- dat %>%
+  mutate(ER_mg_d = -1 * ER_mg_d, ER_mgO2_d_gAFDW = -1 * ER_mgO2_d_gAFDW, ER_mgO2_d_m2 = -1 * ER_mgO2_d_m2)
+
+write_csv(dat, "data/main_analysis/220227_pnld_A_E_rates.csv")
+
+#View(dat)
+
+```

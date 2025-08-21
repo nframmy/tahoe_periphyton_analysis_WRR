@@ -1,0 +1,43 @@
+---
+title: "PAR & O2 tests"
+author: "Nick Framsted"
+date: "2/2/2021"
+output: pdf_document
+---
+# Summary:
+This script contains analysis of data generated from a dry run of incubation chambers using the presens 4-channel SMA units from John Durand's lab and the 10-channel unit. This also contains analysis of PAR data to look at how light levels vary spatially within the waterbaths.
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(ggpubr)
+# changing working directory from /scripts to /tahoe_lab_inc_analysis
+knitr::opts_knit$set(root.dir = '..')
+
+```
+
+# plotting data from test of spatial distn of PAR in waterbaths
+```{r}
+# loading in data
+dat <- read_csv("data/210201_PAR_O2_tests/R_Cat.txt", skip = 5)
+dat$PST <- as_datetime(dat$Unix_Timestamp_Sec, tz = "America/Los_Angeles")
+str(dat)
+head(dat)
+tail(dat)
+#View(dat)
+
+# plotting PAR
+dat %>%
+  filter(PST > "2021-02-01 15:25:05") %>%
+  ggplot(aes(x = PST, y = PAR_umol_m2_s)) +
+  geom_line()
+
+# Maximum par value
+dat %>%
+  filter(PST > "2021-02-01 15:25:05") %>%
+  summarise(max = max(PAR_umol_m2_s))
+
+```
+
+The above plot shows PAR data from various locations in Tank 3 at ~6in depth. The tank was marked 1-3 from left to right on the log side and A-C from front to back on the short side (if the viewer is facing due east) i.e. position 2B was directly in the middle of the tank and 1A was in the left-front corner. PAR meter was positioned at 1A, 2A, 3A, 3B, 2B in that order with the cap placed over the PAR sensor to give 0 measurements between each position.Thus in the middle of the tank, PAR levels were ~2800umol/(m2 x S).

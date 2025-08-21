@@ -1,0 +1,403 @@
+---
+title: "Tahoe_Peri_data_joining"
+output: html_document
+date: "2023-05-07"
+---
+Input data files: Individual dataframes generated from separate analyses of each incubation.
+
+Output data files: Main dataframe of combined dataframes from each incubation.
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(ggpubr)
+library(plotly)
+library(reshape2)
+library(DescTools)
+library(arm)
+library(nlme)
+library(lattice)
+library(emmeans)
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+library(patchwork)
+library(gt)
+
+# changing working directory from /scripts to /tahoe_lab_inc_analysis
+knitr::opts_chunk$set(root.dir = '..')
+```
+
+# Loading and formatting dataframe
+```{r, include = FALSE}
+# importing, cleaning up, and combining metabolism data from all incubations
+### 210301-210315 TC Ambient & Enriched data
+dat1 <- read_csv("data/main_analysis/210301_210315_TC_A_E_rates.csv")
+
+
+### 210407-210421 Pineland A & E data
+dat2 <- read_csv("data/main_analysis/210407_210421_pnld_A_E_rates.csv")
+
+
+### 210613 Pineland A & E data
+
+dat3 <- read_csv("data/main_analysis/210613_pnld_A_E_rates.csv")
+
+### 210808 Pineland A & E data
+
+dat4 <- read_csv("data/main_analysis/210808_pnld_A_E_rates.csv")
+
+
+### 211010 Pineland A & E data
+
+dat5 <- read_csv("data/main_analysis/211010_pnld_A_E_rates.csv")
+
+
+### 211128 Pineland A & E data
+dat6 <- read_csv("data/main_analysis/211128_pnld_A_E_rates.csv")
+
+### 220227 Pineland A & E data
+dat7 <- read_csv("data/main_analysis/220227_pnld_A_E_rates.csv")
+
+
+
+########## Data Formatting #############
+
+dat1 <- dat1 %>%
+  mutate(season = "spring", month = "march") # adding season and month columns to dataframe
+
+
+
+dat2 <- dat2 %>%
+  mutate(season = "spring", month = "april")
+
+
+dat3 <- dat3 %>%
+  mutate(season = "summer", month = "june")
+
+
+dat4 <- dat4 %>%
+  mutate(season = "summer", month = "august")
+
+dat5 <- dat5 %>%
+  mutate(season = "fall", month = "october")
+
+dat6 <- dat6 %>%
+  mutate(season = "winter", month = "november")
+
+dat7 <- dat7 %>%
+  mutate(season = "spring", month = "february")
+
+######### Combining dataframes #########
+dat <- bind_rows(dat1, dat2, dat3, dat4, dat5, dat6, dat7)
+head(dat)
+
+# adding in raw nutrient concentrations of ambient and enriched water for each experiment
+dat <- dat %>%
+  mutate(NO3_N_ug_L = case_when(
+    nutrient_trt == "ambient" & month == "march" ~ 1.41,
+    nutrient_trt == "enriched" & month == "march" ~ 534.89,
+    nutrient_trt == "ambient" & month == "april" ~ 7.03,
+    nutrient_trt == "enriched" & month == "april" ~ 45.19,
+    nutrient_trt == "ambient" & month == "june" ~ 11.01,
+    nutrient_trt == "enriched" & month == "june" ~ 374.8,
+    nutrient_trt == "ambient" & month == "august" ~ 7.5,
+    nutrient_trt == "enriched" & month == "august" ~ 387.33,
+    nutrient_trt == "ambient" & month == "october" ~ 4.53,
+    nutrient_trt == "enriched" & month == "october" ~ 376.76,
+    nutrient_trt == "ambient" & month == "november" ~ 2.06,
+    nutrient_trt == "enriched" & month == "november" ~ 362.43,
+    nutrient_trt == "ambient" & month == "february" ~ 6.74,
+    nutrient_trt == "enriched" & month == "february" ~ 406.6
+  ),
+  NH4_N_ug_L = case_when(
+    nutrient_trt == "ambient" & month == "march" ~ 0.39,
+    nutrient_trt == "enriched" & month == "march" ~ 571.52,
+    nutrient_trt == "ambient" & month == "april" ~ 1.22,
+    nutrient_trt == "enriched" & month == "april" ~ 45.31,
+    nutrient_trt == "ambient" & month == "june" ~ 0, # if concentrations were negative, I entered them in as 0
+    nutrient_trt == "enriched" & month == "june" ~ 395.58,
+    nutrient_trt == "ambient" & month == "august" ~ 4.57,
+    nutrient_trt == "enriched" & month == "august" ~ 416.04,
+    nutrient_trt == "ambient" & month == "october" ~ 5.03,
+    nutrient_trt == "enriched" & month == "october" ~ 438.69,
+    nutrient_trt == "ambient" & month == "november" ~ 2.31,
+    nutrient_trt == "enriched" & month == "november" ~ 408.12,
+    nutrient_trt == "ambient" & month == "february" ~ 3.95,
+    nutrient_trt == "enriched" & month == "february" ~ 409.77
+  ),
+  SRP_ug_L = case_when(
+    nutrient_trt == "ambient" & month == "march" ~ 8.95,
+    nutrient_trt == "enriched" & month == "march" ~ 823.85,
+    nutrient_trt == "ambient" & month == "april" ~ 2.53,
+    nutrient_trt == "enriched" & month == "april" ~ 67.91,
+    nutrient_trt == "ambient" & month == "june" ~ 3.17,
+    nutrient_trt == "enriched" & month == "june" ~ 315.47,
+    nutrient_trt == "ambient" & month == "august" ~ 5.43,
+    nutrient_trt == "enriched" & month == "august" ~ 320.3,
+    nutrient_trt == "ambient" & month == "october" ~ 3.41,
+    nutrient_trt == "enriched" & month == "october" ~ 325.74,
+    nutrient_trt == "ambient" & month == "november" ~ 0.23,
+    nutrient_trt == "enriched" & month == "november" ~ 315.7,
+    nutrient_trt == "ambient" & month == "february" ~ 1.14,
+    nutrient_trt == "enriched" & month == "february" ~ 319.04
+  ),
+  DP_ug_L = case_when(
+    nutrient_trt == "ambient" & month == "march" ~ 9.69,
+    nutrient_trt == "enriched" & month == "march" ~ 822.82,
+    nutrient_trt == "ambient" & month == "april" ~ 8.38,
+    nutrient_trt == "enriched" & month == "april" ~ 76.01,
+    nutrient_trt == "ambient" & month == "june" ~ 8.01,
+    nutrient_trt == "enriched" & month == "june" ~ 328.53,
+    nutrient_trt == "ambient" & month == "august" ~ 10.12,
+    nutrient_trt == "enriched" & month == "august" ~ 323.82,
+    nutrient_trt == "ambient" & month == "october" ~ 13.3,
+    nutrient_trt == "enriched" & month == "october" ~ 332.08,
+    nutrient_trt == "ambient" & month == "november" ~ 6.42,
+    nutrient_trt == "enriched" & month == "november" ~ 329.58,
+    nutrient_trt == "ambient" & month == "february" ~ 4.66,
+    nutrient_trt == "enriched" & month == "february" ~ 319.9
+  ))
+
+
+####### Adding in Unique ID for each Experiment #########
+dat <- dat %>%
+  mutate(exp_ID = case_when(
+    nutrients == 0 & month == "march" ~ 1,
+    nutrients == 1 & month == "march" ~ 2, # since these were separate experiments on different periphyton samples, they get unique experiment IDs
+    nutrients == 0 & month == "april" ~ 3,
+    nutrients == 1 & month == "april" ~ 4,
+    month == "june" ~ 5, # june, aug, and oct experiments used same rocks and chamber assignments for ambient and enriched runs, so it gets the same experiment ID
+    month == "august" ~ 6,
+    month == "october" ~ 7,
+    month == "november" ~ 8,
+    month == "february" ~ 9
+  ))
+
+# Creating rock_ID column
+# using chamber and experiment # columns to give a unique code for each individual rock (this will indicate some sort of chamber or rock effect from repeated measures during the ambient and enriched nutrient runs)
+
+dat <- dat %>%
+  mutate(rock_ID = case_when(
+    exp_ID == 5 & nutrients == 1 ~ row_number() - 16, # accouting for repeated measures on same rocks for the 5,6, and 7th experiments
+    exp_ID == 6 & nutrients == 0 ~ row_number() - 16,
+    exp_ID == 6 & nutrients == 1 ~ row_number() - 32,
+    exp_ID == 7 & nutrients == 0 ~ row_number() - 32,
+    exp_ID == 7 & nutrients == 1 ~ row_number() - 48,
+    exp_ID == 8 & nutrients == 0 ~ row_number() - 48,
+    exp_ID == 8 & nutrients == 1 ~ row_number() - 64,
+    exp_ID == 9 & nutrients == 0 ~ row_number() - 64,
+    exp_ID == 9 & nutrients == 1 ~ row_number() - 80,
+     TRUE ~ as.double(row_number())
+    ))
+#View(dat)
+
+# making rock_ID column a factor instead of numeric for analysis
+dat$rock_ID <- as.factor(dat$rock_ID)
+
+
+
+```
+
+
+# Adding in Chla data
+```{r}
+####### Adding chla data by rock_ID ############
+
+chla_main <- read_csv("data/main_analysis/chla_main_data.csv")
+
+# formatting date column to be a date instead of a character class
+chla_main$date <- mdy(chla_main$date)
+head(chla_main)
+
+# Creating rock_ID column
+# using chamber and experiment # columns to give a unique code for each individual rock (this will indicate some sort of chamber or rock effect from repeated measures during the ambient and enriched nutrient runs)
+
+chla_main <- chla_main %>%
+  mutate(rock_ID = as.double(row_number())
+    )
+#View(chla_main)
+
+# making rock_ID column a factor instead of numeric for analysis
+chla_main$rock_ID <- as.factor(chla_main$rock_ID)
+
+# trimming off chamber column so there aren't duplicate columns in the main dataframe
+
+chla_main <- chla_main %>%
+  dplyr::select(total_chla_ug, date, rock_ID)
+
+# combining chla and main data by rock ID
+
+dat <- left_join(dat, chla_main, by = "rock_ID")
+#View(dat)
+
+
+```
+
+# Adding in corrected AFDW data
+```{r}
+######### Calculating Corrected AFDW data ###############
+
+# since PES drying oven was found to be not operating at correct temperatures after the 11/28/21 experiment, all AFDW samples up to this point had to be redone to ensure they were ashed at proper temperatures
+
+# As a result, we remeasured AFDW of all samples using left-over frozen sample; however, wet wts were found to no longer be accurate due to slight decrease in the water content of samples that had been frozen.
+
+# Since we could no longer scale up these re-measured AFDW samples by wet weight, we chose to scale them up by dry weight. We were able to do this because dry weights from the first set of AFDW samples were still accurate, allowing us to calulate total Dry wt of samples by scaling up using the recorded wet wts of the fresh samples.
+
+# We then use these total dry wts calculated by the first set of AFDW samples to scale up the re-measured AFDW samples using their recorded dry wts (SDW_60C_g).
+
+# These corrected AFDW samples will be stored in a column titled "total_AFDW_g" and will replace the previous column of incorrect AFDW data of the same name.
+
+# loading in re-measured AFDW data
+afdw_main <- read_csv("data/main_analysis/AFDW_main_dat.csv", skip = 1)
+
+
+# Creating rock_ID column
+# using chamber and experiment # columns to give a unique code for each individual rock (this will indicate some sort of chamber or rock effect from repeated measures during the ambient and enriched nutrient runs)
+
+afdw_main <- afdw_main %>%
+  mutate(rock_ID = as.double(row_number() + 16)) # adding 16 to rock_ID to account for lack of re-measured afdw data for the 3/1/21 experiment in this dataset
+         
+#View(afdw_main)
+
+# making rock_ID column a factor instead of numeric for analysis
+afdw_main$rock_ID <- as.factor(afdw_main$rock_ID)
+
+# selecting only columns I need
+
+afdw_main <- afdw_main %>%
+  dplyr::select(SDW_60C_g, SCW_500C_g, rock_ID)
+
+# combining afdw and main data by rock ID column
+
+dat <- left_join(dat, afdw_main, by = "rock_ID")
+
+# calculating corrected AFDW data and recalculating AFDW-normalized metabolic rates
+dat <- dat %>%
+  mutate(total_AFDW_g_2 = case_when(
+    exp_ID == 1 ~ total_AFDW_g, # using old AFDW data since there was no leftover sample
+    TRUE ~ (total_DW_g/SDW_60C_g) * (SDW_60C_g - SCW_500C_g)
+    )) %>% # recalculating AFDW using new data and scaling up based on previous estimates of total Dry weight
+  mutate(GPP_mgO2_d_gAFDW_2 = GPP_mg_d/total_AFDW_g_2, NEP_mgO2_d_gAFDW_2 = NEP_mg_d/total_AFDW_g_2, ER_mgO2_d_gAFDW_2 = ER_mg_d/total_AFDW_g_2) # using corrected AFDW data to calculate AFDW-normalized metabolic rates
+
+#View(dat)
+   
+
+
+```
+
+# Calculating Autotrophic index
+```{r}
+# calculating the autotrophic index (ratio of AFDW:chl-a) (Biggs & Close 1989)
+
+dat <- dat %>%
+  mutate(AI = total_AFDW_g_2/(total_chla_ug/1e6)) # converting chla from ug to g so that the units cancel (g/g) in the AI ratio
+```
+
+# Adding in PP and PCPN data
+```{r}
+# reading in compiled particulate phosphorus data file
+PP <- read_csv("data/nutrient_data/PP_main_R.csv", skip = 1)
+
+PP$date <- lubridate::mdy(PP$date) # formatting date column so that its of date class and not a character
+
+# formatting columns to match main data frame
+PP <- PP %>%
+  filter(!grepl("0.5", sample_2) & chamber != "14_and_15") %>% # filtering out rows of in-situ lake PP concentrations and row of data with an analyitical error
+  mutate(chamber = ifelse(grepl("_1", chamber), gsub('.{2}$', '', chamber), chamber)) %>% # some samples have 2 replicates analyzed using 2 different filtering methods, and we want to keep the data from the samples labeled with "_1". Thus, we're formatting the rows with "_1" in the chamber column to just have chamber number and remove the "_1" characters at the end of the string
+  filter(!grepl("_2", chamber)) %>% # filtering out the replicates with "_2" in the chamber column. These rows correspond to replicates that used the filtering method we dont want to use data from.
+  unite(date_chamber, date, chamber, sep = "_", remove = F) %>% # making a combined column of dates and chambers for use in combining with main dataframe
+  dplyr::select(date_chamber, ug_P_per_liter_ppb, ug_P_per_gram_periphyton) %>% # selecting only the colmns I need
+  group_by(date_chamber) %>% # grouping data so that I can use summary function to get means for each individual sample
+  summarise_if(is.numeric, mean) # averaging duplicate PP measuremnts for some samples from the 3/1/21 experiment
+
+#View(PP)
+
+# reading in PCPN dataframe
+PCPN <- read_csv("data/main_analysis/PCPN_main.csv")
+
+PCPN$date <- lubridate::mdy(PCPN$date) # formatting date column so that its of date class and not a character
+
+# calculating %N and %C content of samples using subsample weights and adding a date_chamber column to use when adding to main dataframe
+PCPN <- PCPN %>%
+  filter(sample_type == "Periphyton" | sample_type == "Filter + Periphyton") %>% # filtering data to only include periphyton samples to exclude water samples
+  mutate(periphyton_particulate_N_ug_g = N_mass_ug/(sample_mass_mg / 1000), periphyton_particulate_C_ug_g = C_mass_ug/(sample_mass_mg / 1000)) %>% # calculating periphyton particulate N and C concentration
+  mutate(periphyton_particulate_N_ug_L = N_mass_ug/(vol_filtered_ml / 1000), periphyton_particulate_C_ug_L = C_mass_ug/(vol_filtered_ml / 1000)) %>% # calculating water column concentrations of pariculate N and C
+  unite(date_chamber, date, chamber, sep = "_", remove = F) %>% # making a combined column of dates and chambers for use in combining with main dataframe
+  dplyr::select(date_chamber, periphyton_particulate_N_ug_g, periphyton_particulate_C_ug_g, periphyton_particulate_N_ug_L, periphyton_particulate_C_ug_L)
+
+#View(PCPN)
+
+dat <- dat %>%
+  mutate(date = lubridate::date(date)) %>%
+  unite(date_chamber, date, chamber, sep = "_", remove = F) # adding a date_chamber column to main dataframe as well
+
+dat <- left_join(dat, PP, by = "date_chamber") # joining particulate phosphorus data to dataframe
+
+dat <- left_join(dat, PCPN, by = "date_chamber") # joining particulate carbon and nitrogen data to dataframe
+
+dat <- dat %>%
+  rename(periphyton_PP_ug_L = ug_P_per_liter_ppb, periphyton_PP_ug_g = ug_P_per_gram_periphyton) %>% # renaming columns in dataframe
+  dplyr::select(-date_chamber) # removing this indexing column as its not longer needed
+#View(dat)
+```
+
+# COMBINING NUTRIENT UPTAKE RATE DATAFRAME WITH MAIN DATA
+```{r}
+# loading in nutrient uptake rate data
+nutrient_dat <- read_csv("data/nutrient_data/nutrient_data_lahontan.csv")
+
+# making rock_ID column a factor variable in nutrient data so that it's compatible with the main dataframe
+nutrient_dat$rock_ID <- as.factor(nutrient_dat$rock_ID)
+
+# combining dataframes
+main_dat <- left_join(dat, nutrient_dat, by = "rock_ID")
+
+
+# making sure that ambient samples have "NA" for nutrient data and uptake rates in dataframe since this data only applies to enriched rocks
+main_dat <- main_dat %>%
+  mutate(across(c(NO3_N_py:DP_rate), ~ifelse(nutrient_trt == "ambient", NA, .))) # making values of NO3_N_py column and all columns to the right of it be NA for ambient nutrient samples
+
+#View(main_dat)
+
+main_dat <- main_dat %>%
+  dplyr::select(-total_AFDW_g, -GPP_mgO2_d_gAFDW:-ER_mgO2_d_gAFDW, -SDW_60C_g, - SCW_500C_g, -bulk_NO3_N_py:-bulk_DP) %>% # removing columns associated with incorrect AFDW data, and other unecessary columns
+  rename(NO3_N_ug_L_initial = NO3_N_ug_L, NH4_N_ug_L_initial = NH4_N_ug_L, SRP_ug_L_initial = SRP_ug_L, DP_ug_L_initial = DP_ug_L, NO3_N_final = NO3_N_py, NH4_N_final = NH4_N, SRP_final = SRP, DP_final = DP)
+
+#View(main_dat)
+
+# exporting main dataframe
+write_csv(main_dat, "data/main_analysis/main_data_lahontan.csv")
+
+```
+
+# Exporting and Cleaning data
+```{r}
+# exporting combined dataframe as .csv
+write_csv(dat, "data/main_analysis/main_rate_data.csv")
+
+#View(dat)
+
+# removing data from march experiments since it was at a different site and had excessive variation in AFDW-normalized GPP rates due to a discrepancy in filtering methods
+dat_pnld <- dat %>%
+  filter(!month == "march")
+#View(dat_pnld)
+glimpse(dat_pnld)
+
+# Chambers 1 and 3 appear to be outliers for the june ambient incubations, and will be removed in subsequent analyses.
+
+# removing outliers
+# chambers 15 and 2 in Nov 2021 experiments had unusually high values for both the ambient and enriched experiments and were thus removed from the analysis
+
+dat_clean <- dat_pnld %>%
+  filter(month != "june" | nutrients != 0 | chamber != 1) %>%
+  filter(month != "june" | nutrients != 0 | chamber != 3) %>%
+  filter(month != "november" | chamber != 2) %>%
+  filter(month != "november" | chamber != 15)
+#View(dat_clean)
+
+# exporting cleaned data frame with outliers removed
+write_csv(dat_clean, "data/main_analysis/cleaned_rate_data.csv")
+
+```

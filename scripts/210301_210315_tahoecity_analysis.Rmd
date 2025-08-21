@@ -1,0 +1,414 @@
+---
+title: "210301-210315 Tahoe City Inc"
+author: "Nick Framsted"
+date: "7/6/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(ggpubr)
+library(plotly)
+library(reshape2)
+library(DescTools)
+
+# changing working directory from /scripts to /tahoe_lab_inc_analysis
+knitr::opts_knit$set(root.dir = '..')
+```
+
+# Importing and Processing data
+```{r, include = FALSE}
+# importing and cleaning up metabolism data from both ambient and enriched incubations
+dat_a <- read_csv("data/210301_tahoecity_ambient_inc/210301_TC_ambient_rates.csv")
+# changing class of chamber column to be compatible with the other dataframe
+dat_a$chamber <- as.character(dat_a$chamber)
+
+# selecting only the columns that I need
+dat_a <- dat_a %>%
+  select(chamber, temp_C, total_DW_g, total_AFDW_g, rock_SA_m2, NEP_mg_d:nutrient_trt)
+
+dat_e <- read_csv("data/210315_tahoecity_enriched_inc/210315_TC_enriched_rates.csv")
+
+# selecting only the columns that I need
+dat_e <- dat_e %>%
+  mutate(chamber = substr(dat_e$chamber, nchar(dat_e$chamber) - 1, nchar(dat_e$chamber))) %>% # removing the word "chamber" from the column and only keeping the number
+  select(chamber, total_DW_g, total_AFDW_g, rock_SA_m2, NEP_mg_d:nutrient_trt)
+#View(dat_e)
+
+# binding the rows of the two dataframes together
+dat <- bind_rows(dat_a, dat_e)
+# adding in nutrient enriched dummy variable column (0 = ambient, 1 = enriched nutrients)
+dat <- dat %>%
+  mutate(nutrients = ifelse(nutrient_trt == "ambient", 0, 1))
+
+# making ER rates positive so that we can log-transform them in subsequent models
+dat <- dat %>%
+  mutate(ER_mg_d = -1 * ER_mg_d, ER_mgO2_d_gAFDW = -1 * ER_mgO2_d_gAFDW, ER_mgO2_d_m2 = -1 * ER_mgO2_d_m2)
+
+# exporting combined dataframe of ambient and enriched experiments
+write_csv(dat, "data/main_analysis/210301_210315_TC_A_E_rates.csv")
+
+#View(dat)
+
+```
+
+# AFDW-normalized rates
+## GPP vs. temperature and nutrients
+```{r}
+# linear model of GPP and temp
+GPP_AFDW_mod <- lm(GPP_mgO2_d_gAFDW ~ temp_C*nutrients, dat)
+summary(GPP_AFDW_mod)
+
+dat %>%
+  ggplot(aes(x = temp_C, y = GPP_mgO2_d_gAFDW, color = nutrient_trt)) +
+  geom_point(shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  stat_regline_equation() +
+  theme_classic() +
+  labs(title = "GPP response to Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(GPP~(mgO[2]~day^{-1}~gAFDW^{-1})))
+
+# making plotly plot to investigate outlying datapoints
+p <- dat %>%
+  ggplot(aes(x = temp_C, y = GPP_mgO2_d_gAFDW, color = nutrient_trt)) +
+  geom_point(aes(group = chamber), shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  theme_classic()
+
+p <- plotly::ggplotly(p)
+p
+```
+According to this plot, chambers 5, 14, and 15 are potential outliers. This may be due to error in AFDW measurements since this experiment used GF/F filters to estimate AFDW, which we found to be potentially inaccurate compared to the nitex mesh filtering method.
+
+## ER (AFDW-normalized) vs. temperature and nutrients
+```{r}
+ER_AFDW_mod <- lm(ER_mgO2_d_gAFDW ~ temp_C*nutrients, dat)
+summary(ER_AFDW_mod)
+
+dat %>%
+  ggplot(aes(x = temp_C, y = ER_mgO2_d_gAFDW, color = nutrient_trt)) +
+  geom_point(shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  stat_regline_equation() +
+  theme_classic() +
+  labs(title = "ER response to Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(ER~(mgO[2]~day^{-1}~gAFDW^{-1})))
+
+# making plotly plot to investigate outlying datapoints
+p <- dat %>%
+  ggplot(aes(x = temp_C, y = ER_mgO2_d_gAFDW, color = nutrient_trt)) +
+  geom_point(aes(group = chamber), shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  theme_classic()
+
+p <- plotly::ggplotly(p)
+p
+```
+
+## NEP (AFDW-normalized) vs. temperature and nutrients
+```{r}
+NEP_AFDW_mod <- lm(NEP_mgO2_d_gAFDW ~ temp_C*nutrients, dat)
+summary(NEP_AFDW_mod)
+
+dat %>%
+  ggplot(aes(x = temp_C, y = NEP_mgO2_d_gAFDW, color = nutrient_trt)) +
+  geom_point(shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  stat_regline_equation() +
+  theme_classic() +
+  labs(title = "NEP response to Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(NEP~(mgO[2]~day^{-1}~gAFDW^{-1})))
+
+# making plotly plot to investigate outlying datapoints
+p <- dat %>%
+  ggplot(aes(x = temp_C, y = NEP_mgO2_d_gAFDW, color = nutrient_trt)) +
+  geom_point(aes(group = chamber), shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  theme_classic()
+
+p <- plotly::ggplotly(p)
+p
+```
+Looks like chambers 14 and 15 are likely outliers for both AFDW-normalized NEP and ER, this is potentially due to sampling error in measurements of AFDW.
+
+# Surface area-normalized rates
+## GPP vs. temperature and nutrients
+```{r}
+# linear model of GPP and temp
+GPP_SA_mod <- lm(GPP_mgO2_d_m2 ~ temp_C*nutrients, dat)
+summary(GPP_SA_mod)
+
+GPP_SA_plot <- dat %>%
+  ggplot(aes(x = temp_C, y = GPP_mgO2_d_m2, color = nutrient_trt)) +
+  geom_point(shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  stat_regline_equation() +
+  theme_classic() +
+  labs(title = "GPP response to Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(GPP~(mgO[2]~day^{-1}~m^{-2})))
+GPP_SA_plot
+
+# making simplified plot w/o expressions for use in plotly function
+GPP_SA <- dat %>%
+  ggplot(aes(x = temp_C, y = GPP_mgO2_d_m2, color = nutrient_trt)) +
+  geom_point(aes(group = chamber), shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  theme_classic()
+# interactive plotly plot to get info on individual data points
+GPP_SA_plotly <- plotly::ggplotly(GPP_SA)
+GPP_SA_plotly
+```
+
+
+## ER with temp and nutrients
+```{r}
+# linear model of GPP and temp
+ER_SA_mod <- lm(ER_mgO2_d_m2 ~ temp_C*nutrients, dat)
+summary(ER_SA_mod)
+
+dat %>%
+  ggplot(aes(x = temp_C, y = ER_mgO2_d_m2, color = nutrient_trt)) +
+  geom_point(shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  stat_regline_equation() +
+  theme_classic() +
+  labs(title = "ER response to Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(ER~(mgO[2]~day^{-1}~m^{-2})))
+
+# making simplified plot without expressions in the axis labels for plotly
+ER_SA_plot <- dat %>%
+  ggplot(aes(x = temp_C, y = ER_mgO2_d_m2, color = nutrient_trt)) +
+  geom_point(aes(group = chamber), shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  theme_classic()
+
+# ploting interactive plot in plotly to identify which datapoints correspond to which chambers
+ER_SA_plotly <- plotly::ggplotly(ER_SA_plot)
+ER_SA_plotly
+
+# removing potential outliers (chambers 2 and 8 of enriched incubation)
+dat_clean <- dat %>%
+  filter(!chamber == "Chamber 2" & !chamber == "Chamber 8")
+
+# linear model of GPP and temp
+ER_SA_mod2 <- lm(ER_mgO2_d_m2 ~ temp_C*nutrients, dat_clean)
+summary(ER_SA_mod2)
+
+dat_clean %>%
+  ggplot(aes(x = temp_C, y = ER_mgO2_d_m2, color = nutrient_trt)) +
+  geom_point(shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  stat_regline_equation() +
+  theme_classic() +
+  labs(title = "ER response to Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(ER~(mgO[2]~day^{-1}~m^{-2})))
+
+```
+
+
+## NEP with temp and nutrients
+```{r}
+# linear model of GPP and temp
+NEP_SA_mod <- lm(NEP_mgO2_d_m2 ~ temp_C*nutrients, dat)
+summary(NEP_SA_mod)
+
+dat %>%
+  ggplot(aes(x = temp_C, y = NEP_mgO2_d_m2, color = nutrient_trt)) +
+  geom_point(shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  stat_regline_equation() +
+  theme_classic() +
+  labs(title = "NEP response to Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(NEP~(mgO[2]~day^{-1}~m^{-2})))
+
+# making simplified plot without expressions in the axis labels for plotly
+NEP_SA_plot <- dat %>%
+  ggplot(aes(x = temp_C, y = NEP_mgO2_d_m2, color = nutrient_trt)) +
+  geom_point(aes(group = chamber), shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  theme_classic()
+
+# ploting interactive plot in plotly to identify which datapoints correspond to which chambers
+NEP_SA_plotly <- plotly::ggplotly(NEP_SA_plot)
+NEP_SA_plotly
+
+
+# linear model of GPP and temp with 2 outliers removed (chambers 2 and 8 of enriched incubation)
+NEP_SA_mod2 <- lm(NEP_mgO2_d_m2 ~ temp_C*nutrients, dat_clean)
+summary(NEP_SA_mod2)
+
+dat_clean %>%
+  ggplot(aes(x = temp_C, y = NEP_mgO2_d_m2, color = nutrient_trt)) +
+  geom_point(shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  stat_regline_equation() +
+  theme_classic() +
+  labs(title = "NEP response to Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(NEP~(mgO[2]~day^{-1}~m^{-2})))
+```
+Still seeing some outliers for chambers 2 and 8. These chambers have large NEP rates and low ER rates when normalized to rock surface area. These are the two smallest rocks in the incubation, and these anomalous rates may be due to errors associated with surface area measurements or just not having enough periphyhton to get an accurate signal from. To test if this is due to possible errors in surface area measurments or is actually the result of abnormal DO curves I will plot non-normalized metabolic rates.
+
+# Investigating outlying datapoints and sources of error
+```{r}
+# Plotting non normalized NEP + ER to investigate sources of variation. This could either be error in DO measurements or error in surface area measurments.
+
+## NEP ##
+# making simplified plot without expressions in the axis labels for plotly
+NEP_plot <- dat %>%
+  ggplot(aes(x = temp_C, y = NEP_mg_d, color = nutrient_trt, group = chamber)) +
+  geom_point(shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  stat_regline_equation() +
+  theme_classic()
+
+# ploting interactive plot in plotly to identify which datapoints correspond to which chambers
+NEP_plotly <- plotly::ggplotly(NEP_plot)
+NEP_plotly
+
+## ER ##
+# making simplified plot without expressions in the axis labels for plotly
+ER_plot <- dat %>%
+  ggplot(aes(x = temp_C, y = ER_mg_d, color = nutrient_trt, group = chamber)) +
+  geom_point(shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  stat_regline_equation() +
+  theme_classic()
+
+# ploting interactive plot in plotly to identify which datapoints correspond to which chambers
+ER_plotly <- plotly::ggplotly(ER_plot)
+ER_plotly
+```
+For NEP measurements, rock 16 likely has an outlying value. For ER rates, rocks 8 and 10 seem to have outlying data points. Rock 8 is also an outlier after normalizing rates by rock surface area, thus there may have been an error in DO measurements. Rock 2 is an emerging outlier according to surface area-normalized rates, but not for raw, non-normalized rates. This suggests possible error in the surface area measurement for rock 2. For this reason they should possibly be excluded from the regression analyses.
+
+# Plotting additional Variables to asses outlier datapoints
+```{r}
+#View(dat)
+# plot of total AFDW of all chambers
+dat %>%
+  ggplot(aes(x = chamber, y = total_AFDW_g)) +
+  geom_col() +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+# plot of total DW of all chambers
+dat %>%
+  ggplot(aes(x = chamber, y = total_DW_g)) +
+  geom_col() +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+# plot of rock surface area of all chambers
+dat %>%
+  ggplot(aes(x = chamber, y = rock_SA_m2)) +
+  geom_col() +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+# calculating average total AFDW for thi incubation to compare to that of other incubations
+mean(dat$total_AFDW_g)
+
+
+### calculating average AFDW/m2 for the ambient and enriched incubations
+avg_AFDW <- dat %>%
+  group_by(nutrient_trt) %>%
+  summarize(avg_AFDW_g_m2 = mean(total_AFDW_g/rock_SA_m2), sd_AFDW_g_m2 = sd(total_AFDW_g/rock_SA_m2))
+avg_AFDW
+
+```
+
+
+# Double Logarithmic graphs (as specified in section 7.3.3 of del Giorgio & Williams 2005)
+
+## GPP
+```{r}
+# linear model of log-transformed GPP (biomass-normalized) and log-transformed temperature
+
+log_GPP_AFDW_mod <- lm(log(GPP_mgO2_d_gAFDW) ~ log(temp_C)*nutrients, dat)
+summary(log_GPP_AFDW_mod)
+
+plot(log_GPP_AFDW_mod)
+###### Model interpretations ######
+
+# interpreting effect size of temperature effect
+exp(coef(log_GPP_AFDW_mod)["log(temp_C)"])
+
+
+GPP_log_log <- dat %>%
+  ggplot(aes(x = temp_C, y = GPP_mgO2_d_gAFDW, color = nutrient_trt)) +
+  scale_y_log10() +
+  scale_x_log10() +
+  geom_point(shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  #scale_color_discrete(name = "Nutrient Treatment")+
+  theme_classic() +
+  labs(title = "Periphyton GPP vs. Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(GPP~(mgO[2]~day^{-1}~gAFDW^{-1})))
+
+ggsave("plots/210315_tahoecity_enriched/210315_GPP_log_log_plot.png", plot = GPP_log_log, width = 4, height = 2.5)
+```
+
+## ER
+```{r}
+# linear model of log-transformed ER rates (biomass normalized) and log-transformed temperature
+log_ER_AFDW_mod <- lm(log(ER_mgO2_d_gAFDW) ~ log(temp_C)*nutrients, dat)
+summary(log_ER_AFDW_mod)
+
+plot(log_ER_AFDW_mod)
+
+###### Model interpretations ######
+
+# interpreting effect size of temperature effect
+exp(coef(log_ER_AFDW_mod)["log(temp_C)"])
+
+
+ER_log_log <- dat %>%
+  ggplot(aes(x = temp_C, y = ER_mgO2_d_gAFDW, color = nutrient_trt)) +
+  scale_y_log10() +
+  scale_x_log10() +
+  geom_point(shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  #stat_regline_equation() +
+  theme_classic() +
+  labs(title = "ER response to Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(ER~(mgO[2]~day^{-1}~gAFDW^{-1})))
+
+ggsave("plots/210315_tahoecity_enriched/210315_ER_log_log_plot.png", plot = ER_log_log, width = 4, height = 2.5)
+```
+
+## NEP
+```{r}
+# linear model of log-transformed NEP (biomass normalized) and log-transformed temp
+log_NEP_AFDW_mod <- lm(log(NEP_mgO2_d_gAFDW) ~ log(temp_C)*nutrients, dat)
+summary(log_NEP_AFDW_mod)
+
+plot(log_NEP_AFDW_mod)
+
+# no significant predictors in the model
+
+
+NEP_log_log <- dat %>%
+  ggplot(aes(x = temp_C, y = NEP_mgO2_d_gAFDW, color = nutrient_trt)) +
+  scale_y_log10() +
+  scale_x_log10() +
+  geom_point(shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  #stat_regline_equation() +
+  theme_classic() +
+  labs(title = "NEP response to Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(NEP~(mgO[2]~day^{-1}~gAFDW)))
+
+ggsave("plots/210315_tahoecity_enriched/210315_NEP_log_log_plot.png", plot = NEP_log_log, width = 4, height = 2.5)
+```

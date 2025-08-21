@@ -1,0 +1,165 @@
+"Changes to original data: made ""Sample"" data column name lower case, replaced spaces in column names with underscores, removed parentheses from column names, Sample column edits: removed special characters from sample column, removed ""TPI"", added values to the resulting column ""sample_2"", made column of just chamber numbers from sample_2 column buy removing all letters and underscores except for ambient nutrients samples",,,,,,,,
+date,sample,ml_filtered,ug_P_per_liter_ppb,grams_periphyton,ug_P_per_gram_periphyton,comments,sample_2,chamber
+3/1/2021,"TPI, TC-0.5",250,1.220825853,,,,TC_0.5,TC_0.5
+3/1/2021,"TPI, TC-A-1",5,2502.692998,,,,TC_A_1,1
+3/1/2021,"TPI, TC-A-1",5,4194.321963,,,,TC_A_1,1
+3/1/2021,"TPI, TC-A-2",4,5791.878516,,,,TC_A_2,2
+3/1/2021,"TPI, TC-A-3",5,2524.663076,,,,TC_A_3,3
+3/1/2021,"TPI, TC-A-4",5,2997.433872,,,,TC_A_4,4
+3/1/2021,"TPI, TC-A-5",5,2985.464991,,,,TC_A_5,5
+3/1/2021,"TPI, TC-A-6",5,4858.594853,,,,TC_A_6,6
+3/1/2021,"TPI, TC-A-6",5,5620.647516,,,,TC_A_6,6
+3/1/2021,"TPI, TC-A-7",5,5786.183124,,,,TC_A_7,7
+3/1/2021,"TPI, TC-A-7",5,7763.077199,,,,TC_A_7,7
+3/1/2021,"TPI, TC-A-7",10,3695.006583,,,,TC_A_7,7
+3/1/2021,"TPI, TC-A-7",10,4174.776182,,,,TC_A_7,7
+3/1/2021,"TPI, TC-A-8",7,3312.264683,,,,TC_A_8,8
+3/1/2021,"TPI, TC-A-8",7,3809.56741,,,,TC_A_8,8
+3/1/2021,"TPI, TC-A-9",5,4834.657092,,,,TC_A_9,9
+3/1/2021,"TPI, TC-A-9",5,5512.927588,,,,TC_A_9,9
+3/1/2021,"TPI, TC-A-10",5,6252.969479,,,,TC_A_10,10
+3/1/2021,"TPI, TC-A-10",5,6985.09994,,,,TC_A_10,10
+3/1/2021,"TPI, TC-A-14 & 15",10,2973.49611,,,filter 14 and filter 15 were accidentaly put in the same vial (10ml filtered reflects 6ml + 4ml). 20 mL volume rehydrated sample.,TC_A_14_and_15,14_and_15
+3/1/2021,"TPI, TC-A-17",4,5160.616397,,,,TC_A_17,17
+3/1/2021,"TPI, TC-A-18",5,3260.749252,,,,TC_A_18,18
+3/1/2021,"TPI, TC-A-19",9,2449.867677,,,,TC_A_19,19
+3/1/2021,"TPI, TC-A-20",8,2782.283064,,,,TC_A_20,20
+3/15/2021,"TPI, TC-E-1",,,0.1744,105.0536953,,TC_E_1,1
+3/15/2021,"TPI, TC-E-1",,,0.1744,243.4679009,,TC_E_1,1
+3/15/2021,"TPI, TC-E-2",,,0.507,54.47611358,,TC_E_2,2
+3/15/2021,"TPI, TC-E-3",,,0.0932,401.0088791,,TC_E_3,3
+3/15/2021,"TPI, TC-E-4",,,0.0496,558.0490724,,TC_E_4,4
+3/15/2021,"TPI, TC-E-5",,,0.043,670.1459925,,TC_E_5,5
+3/15/2021,"TPI, TC-E-6",,,0.0368,706.6193115,,TC_E_6,6
+3/15/2021,"TPI, TC-E-7",,,0.0428,632.7287371,,TC_E_7,7
+3/15/2021,"TPI, TC-E-8",,,0.0846,390.8419669,0.846 g. written on label. Nick F. confirmed with S. Sesma it was a typo. They meant to write 0.0846 g. ,TC_E_8,8
+3/15/2021,"TPI, TC-E-9",,,0.0734,476.5701818,,TC_E_9,9
+3/15/2021,"TPI, TC-E-10",,,0.0697,481.2623477,,TC_E_10,10
+3/15/2021,"TPI, TC-E-11",,,0.0614,495.6364267,,TC_E_11,11
+3/15/2021,"TPI, TC-E-12",,,0.0827,420.0831164,,TC_E_12,12
+3/15/2021,"TPI, TC-E-13",,,0.0818,451.0424486,,TC_E_13,13
+3/15/2021,"TPI, TC-E-14",,,0.0691,533.9402647,,TC_E_14,14
+3/15/2021,"TPI, TC-E-15",,,0.068,434.3295667,,TC_E_15,15
+3/15/2021,"TPI, TC-E-16",,,0.0721,427.0616231,,TC_E_16,16
+4/7/2021,PNLD-A-1#1,,,0.0285,15631.29982,,PNLD_A_1_1,1_1
+4/7/2021,PNLD-A-2,,,0.0418,15366.26696,,PNLD_A_2,2
+4/7/2021,PNLD-A-3,,,0.0456,21865.21105,,PNLD_A_3,3
+4/7/2021,PNLD-A-4#1,,,0.0591,16661.23257,,PNLD_A_4_1,4_1
+4/7/2021,PNLD-A-5#1,,,0.0804,19591.20133,,PNLD_A_5_1,5_1
+4/7/2021,PNLD-A-6,,,0.0857,32131.65659,,PNLD_A_6,6
+4/7/2021,PNLD-A-7,,,0.0644,18895.23712,,PNLD_A_7,7
+4/7/2021,PNLD-A-8,,,0.0608,17038.58202,,PNLD_A_8,8
+4/7/2021,PNLD-A-9,,,0.0529,14180.47862,,PNLD_A_9,9
+4/7/2021,PNLD-A-10,,,,,spill. No data,PNLD_A_10,10
+4/7/2021,PNLD-A-11,,,0.09,17671.70824,,PNLD_A_11,11
+4/7/2021,PNLD-A-12#1,,,0.0647,7923.793147,,PNLD_A_12_1,12_1
+4/7/2021,PNLD-A-13,,,0.0613,12333.44324,,PNLD_A_13,13
+4/7/2021,PNLD-A-14,,,0.0489,19280.98786,,PNLD_A_14,14
+4/7/2021,PNLD-A-15,,,0.0568,14389.5192,,PNLD_A_15,15
+4/7/2021,PNLD-A-16,,,0.0429,14148.099,,PNLD_A_16,16
+4/7/2021,PNLD-0.5,420,1.445127255,,,,PNLD_0.5,0.5
+4/7/2021,PNLD-A-1#2,5,360.6364172,,,,PNLD_A_1_2,1_2
+4/7/2021,PNLD-A-4#2,6,374.1897466,,,,PNLD_A_4_2,4_2
+4/7/2021,PNLD-A-5#2,7,216.3481775,,,,PNLD_A_5_2,5_2
+4/7/2021,PNLD-A-12#2,6,183.6574347,,,,PNLD_A_12_2,12_2
+4/21/2021,PNLD-E-1,,,0.0775,13922.10162,,PNLD_E_1,1
+4/21/2021,PNLD-E-2,,,0.07,14260.45963,,PNLD_E_2,2
+4/21/2021,PNLD-E-3,,,0.068,17244.96516,,PNLD_E_3,3
+4/21/2021,PNLD-E-4,,,0.0645,14115.19645,,PNLD_E_4,4
+4/21/2021,PNLD-E-5,,,0.0708,21481.91058,,PNLD_E_5,5
+4/21/2021,PNLD-E-6,,,0.0443,16481.08267,,PNLD_E_6,6
+4/21/2021,PNLD-E-7,,,0.0528,17879.14502,,PNLD_E_7,7
+4/21/2021,PNLD-E-8,,,0.0418,12011.06371,,PNLD_E_8,8
+4/21/2021,PNLD-E-9,,,0.0728,16018.89566,,PNLD_E_9,9
+4/21/2021,PNLD-E-10,,,0.088,13955.10794,,PNLD_E_10,10
+4/21/2021,PNLD-E-11,,,0.0681,19149.28045,,PNLD_E_11,11
+4/21/2021,PNLD-E-12,,,0.0468,15046.66354,,PNLD_E_12,12
+4/21/2021,PNLD-E-13,,,0.05,22804.94991,,PNLD_E_13,13
+4/21/2021,PNLD-E-14,,,0.0521,18164.60571,,PNLD_E_14,14
+4/21/2021,PNLD-E-15,,,0.0517,12173.0349,,PNLD_E_15,15
+4/21/2021,PNLD-E-16,,,0.0706,12035.90405,,PNLD_E_16,16
+4/21/2021,PNLD-0.5,280,1.318854,,,,PNLD_0.5,0.5
+6/13/2021,TPI: PNLD-E #1,,,0.05,12254.49516,Initial concentration greater than high standard (400 ug/L),PNLD_E_1,1
+6/13/2021,TPI: PNLD-E #2,,,0.0822,13893.75651,Initial concentration greater than high standard (400 ug/L),PNLD_E_2,2
+6/13/2021,TPI: PNLD-E #3,,,0.0747,12844.63415,Nick F. will need to adjust equation to account for higher intital test tube volume. ,PNLD_E_3,3
+6/13/2021,TPI: PNLD-E #4,,,0.0677,7316.937207,Initial concentration greater than high standard (400 ug/L),PNLD_E_4,4
+6/13/2021,TPI: PNLD-E #5,,,0.0462,21345.64375,Initial concentration greater than high standard (400 ug/L),PNLD_E_5,5
+6/13/2021,TPI: PNLD-E #6,,,0.0785,11497.94167,Initial concentration greater than high standard (400 ug/L),PNLD_E_6,6
+6/13/2021,TPI: PNLD-E #7,,,0.0478,15261.50834,Initial concentration greater than high standard (400 ug/L),PNLD_E_7,7
+6/13/2021,TPI: PNLD-E #8,,,0.0496,5314.19903,Initial concentration greater than high standard (400 ug/L),PNLD_E_8,8
+6/13/2021,TPI: PNLD-E #9,,,0.0604,10537.01138,,PNLD_E_9,9
+6/13/2021,TPI: PNLD-E #10,,,0.0757,21178.8701,Initial concentration greater than high standard (400 ug/L),PNLD_E_10,10
+6/13/2021,TPI: PNLD-E #11,,,0.0439,10176.52971,Initial concentration greater than high standard (400 ug/L),PNLD_E_11,11
+6/13/2021,TPI: PNLD-E #12,,,0.0484,15145.79976,Initial concentration greater than high standard (400 ug/L),PNLD_E_12,12
+6/13/2021,TPI: PNLD-E #13,,,0.0655,7635.096102,Initial concentration greater than high standard (400 ug/L),PNLD_E_13,13
+6/13/2021,TPI: PNLD-E #14,,,0.0634,8187.182618,Initial concentration greater than high standard (400 ug/L),PNLD_E_14,14
+6/13/2021,TPI: PNLD-E #15,,,0.0583,7734.117184,Initial concentration greater than high standard (400 ug/L),PNLD_E_15,15
+6/13/2021,TPI: PNLD-E #16,,,0.076,12570.32623,Initial concentration greater than high standard (400 ug/L),PNLD_E_16,16
+8/8/2021,TPI: PNLD-E #1,,,0.0372,7680.491551,,PNLD_E_1,1
+8/8/2021,TPI: PNLD-E #2,,,0.0443,9219.352344,,PNLD_E_2,2
+8/8/2021,TPI: PNLD-E #3,,,0.0514,9687.262864,Initial concentration above high standard limit (>440 ug/L),PNLD_E_3,3
+8/8/2021,TPI: PNLD-E #4,,,0.032,8854.4754,,PNLD_E_4,4
+8/8/2021,TPI: PNLD-E #5,,,0.057,8215.559646,Initial concentration above high standard limit (>440 ug/L),PNLD_E_5,5
+8/8/2021,TPI: PNLD-E #6,,,0.0526,11291.89666,Initial concentration above high standard limit (>440 ug/L),PNLD_E_6,6
+8/8/2021,TPI: PNLD-E #7,,,0.0658,6242.984525,,PNLD_E_7,7
+8/8/2021,TPI: PNLD-E #8,,,0.0825,14247.99267,Initial concentration above high standard limit (>440 ug/L),PNLD_E_8,8
+8/8/2021,TPI: PNLD-E #9,,,0.0577,10499.29166,Initial concentration above high standard limit (>440 ug/L),PNLD_E_9,9
+8/8/2021,TPI: PNLD-E #10,,,0.0426,9322.880575,,PNLD_E_10,10
+8/8/2021,TPI: PNLD-E #11,,,0.0437,8830.483208,,PNLD_E_11,11
+8/8/2021,TPI: PNLD-E #12,,,0.0557,7492.079574,,PNLD_E_12,12
+8/8/2021,TPI: PNLD-E #13,,,0.0527,11146.74219,Initial concentration above high standard limit (>440 ug/L),PNLD_E_13,13
+8/8/2021,TPI: PNLD-E #14,,,0.0518,6934.701659,,PNLD_E_14,14
+8/8/2021,TPI: PNLD-E #15,,,0.052,7181.615065,,PNLD_E_15,15
+8/8/2021,TPI: PNLD-E #16,,,0.0667,7820.630289,Initial concentration above high standard limit (>440 ug/L),PNLD_E_16,16
+8/8/2021,TPI: PNLD-E 0.5 m,140,4.064696418,,,,PNLD_E_0.5m,0.5m
+10/10/2021,TPI: PNLD-E #1,,,0.0672,6452.80236,,PNLD_E_1,1
+10/10/2021,TPI: PNLD-E #2,,,0.0632,4938.202457,"1-Use with caution, Spill during analysis.",PNLD_E_2,2
+10/10/2021,TPI: PNLD-E #3,,,0.0556,5931.537955,,PNLD_E_3,3
+10/10/2021,TPI: PNLD-E #4,,,0.0572,7663.428017,,PNLD_E_4,4
+10/10/2021,TPI: PNLD-E #5,,,0.0565,7653.953586,,PNLD_E_5,5
+10/10/2021,TPI: PNLD-E #6,,,0.0557,7414.351006,,PNLD_E_6,6
+10/10/2021,TPI: PNLD-E #7,,,0.0576,6268.436578,,PNLD_E_7,7
+10/10/2021,TPI: PNLD-E #8,,,0.0397,8530.052087,,PNLD_E_8,8
+10/10/2021,TPI: PNLD-E #9,,,0.0602,5409.696293,,PNLD_E_9,9
+10/10/2021,TPI: PNLD-E #10,,,0.0539,8679.899957,,PNLD_E_10,10
+10/10/2021,TPI: PNLD-E #11,,,0.0588,8949.892641,,PNLD_E_11,11
+10/10/2021,TPI: PNLD-E #12,,,0.0528,7519.889157,,PNLD_E_12,12
+10/10/2021,TPI: PNLD-E #13,,,0.0591,7966.099157,,PNLD_E_13,13
+10/10/2021,TPI: PNLD-E #14,,,0.0674,6424.901307,,PNLD_E_14,14
+10/10/2021,TPI: PNLD-E #15,,,0.0512,9010.877581,,PNLD_E_15,15
+10/10/2021,TPI: PNLD-E #16,,,0.0499,8725.415433,,PNLD_E_16,16
+10/10/2021,TPI: PNLD-E 0.5 m,280,2.423093131,,,,PNLD_E_0.5m,0.5m
+11/28/2021,TPI: PNLD #1,,,0.0578,11357.24592,,PNLD_1,1
+11/28/2021,TPI: PNLD #2,,,0.0924,13639.24296,,PNLD_2,2
+11/28/2021,TPI: PNLD #3,,,0.0827,14476.70893,,PNLD_3,3
+11/28/2021,TPI: PNLD #4,,,0.0667,7873.449048,,PNLD_4,4
+11/28/2021,TPI: PNLD #5,,,0.0654,11974.18387,,PNLD_5,5
+11/28/2021,TPI: PNLD #6,,,0.0744,11994.93772,,PNLD_6,6
+11/28/2021,TPI: PNLD #7,,,0.0692,11199.63091,,PNLD_7,7
+11/28/2021,TPI: PNLD #8,,,0.0496,8197.447714,,PNLD_8,8
+11/28/2021,TPI: PNLD #9,,,0.0492,8299.360032,,PNLD_9,9
+11/28/2021,TPI: PNLD #10,,,0.0546,12393.62142,,PNLD_10,10
+11/28/2021,TPI: PNLD #11,,,0.0506,6618.095863,,PNLD_11,11
+11/28/2021,TPI: PNLD #12,,,0.0414,9513.750933,,PNLD_12,12
+11/28/2021,TPI: PNLD #13,,,0.0419,17502.9091,,PNLD_13,13
+11/28/2021,TPI: PNLD #14,,,0.0986,7027.242001,,PNLD_14,14
+11/28/2021,TPI: PNLD #15,,,0.0566,14816.87366,,PNLD_15,15
+11/28/2021,TPI: PNLD #16,,,0.0534,7440.814655,,PNLD_16,16
+11/28/2021,TPI: PNLD 0.5 m,280,1.34264232,,,,PNLD_0.5m,0.5m
+2/27/2021,TPI: PNLD #1,,,0.0631,17310.90648,Greater than standard - diluted after reagents added; diluted values reported below,PNLD_1,1
+2/27/2021,TPI: PNLD #2,,,0.0793,12030.75596,Greater than standard - diluted after reagents added; diluted values reported below,PNLD_2,2
+2/27/2021,TPI: PNLD #3,,,0.0576,10388.54209,Greater than standard - diluted after reagents added; diluted values reported below,PNLD_3,3
+2/27/2021,TPI: PNLD #4,,,0.0451,12007.64764,Greater than standard - diluted after reagents added; diluted values reported below,PNLD_4,4
+2/27/2021,TPI: PNLD #5,,,0.079,9487.971075,Greater than standard - diluted after reagents added; diluted values reported below,PNLD_5,5
+2/27/2021,TPI: PNLD #6,,,0.058,14327.48018,Greater than standard - diluted after reagents added; diluted values reported below,PNLD_6,6
+2/27/2021,TPI: PNLD #7,,,0.064,11162.40583,Greater than standard - diluted after reagents added; diluted values reported below,PNLD_7,7
+2/27/2021,TPI: PNLD #8,,,0.0535,13594.10115,Greater than standard - diluted after reagents added; diluted values reported below,PNLD_8,8
+2/27/2021,TPI: PNLD #9,,,0.0473,12799.39055,Greater than standard - diluted after reagents added; diluted values reported below,PNLD_9,9
+2/27/2021,TPI: PNLD #10,,,0.0362,14263.81105,Greater than standard - diluted after reagents added; diluted values reported below,PNLD_10,10
+2/27/2021,TPI: PNLD #11,,,0.0677,14421.03767,Greater than standard - diluted after reagents added; diluted values reported below,PNLD_11,11
+2/27/2021,TPI: PNLD #12,,,0.0625,9058.462843,Greater than standard - diluted after reagents added; diluted values reported below,PNLD_12,12
+2/27/2021,TPI: PNLD #13,,,0.0605,19836.8453,Greater than standard - diluted after reagents added; diluted values reported below,PNLD_13,13
+2/27/2021,TPI: PNLD #14,,,0.0405,13892.30503,Greater than standard - diluted after reagents added; diluted values reported below,PNLD_14,14
+2/27/2021,TPI: PNLD #15,,,0.0438,11186.82999,Greater than standard - diluted after reagents added; diluted values reported below,PNLD_15,15
+2/27/2021,TPI: PNLD #16,,,0.0372,8950.380988,Within limits of 10% of high standard. Initial conentration less than 440 ug/L.,PNLD_16,16
+2/27/2021,TPI: PNLD 0.5 m,280,-1.815333699,,,,PNLD_0.5m,0.5m

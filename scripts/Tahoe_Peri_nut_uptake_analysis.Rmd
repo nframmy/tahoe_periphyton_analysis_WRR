@@ -1,0 +1,949 @@
+---
+title: "Lahontan Nutrient Uptake Analysis"
+author: "Nick Framsted"
+date: "9/29/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(lubridate)
+library(ggpubr)
+library(plotly)
+library(reshape2)
+library(DescTools)
+library(arm)
+library(lme4)
+library(lattice)
+library(tidyverse)
+
+# changing working directory from /scripts to /tahoe_lab_inc_analysis
+knitr::opts_chunk$set(root.dir = '..')
+```
+
+# Loading and formatting dataframe
+```{r, include = FALSE}
+# importing nutrient data
+dat <- read_csv("data/nutrient_data/220328_nutrient_data_main_R.csv", skip = 2)
+head(dat)
+
+dat <- dat[-c(192:422),] # removing the last rows of containing no data
+#View(dat)
+
+
+# reformatting date column into datetimes in POSIXct
+dat$date <- mdy_hm(dat$date)
+
+#renaming date column as datetime and creating a separate data column without the time
+dat <- dat %>%
+  rename(datetime = date) %>%
+  mutate(date = date(datetime))
+#View(dat)
+
+
+
+```
+
+# Creating dataframe containing field nutrient concentrations only
+## Figure 7
+```{r}
+ambient_nutrients <- dat %>%
+  filter(site_treatment == "TPI_TC_NA" | site_treatment == "TPI_PNLD_0.5m") %>%
+ mutate(month = month(datetime, label = T, abbr = F)) # adding a month column to dataframe based on the datetime column
+
+# loading in particulate phosphorus data
+PP <- read_csv("data/nutrient_data/PP_main_R.csv", skip = 1)
+
+PP$date <- lubridate::mdy(PP$date) # formatting date column so that its of date class and not a character
+
+# formatting columns to match main data frame
+PP <- PP %>%
+  filter(grepl("0.5", sample_2)) %>% # selecting only rows with in-situ data
+  dplyr::select(date, ug_P_per_liter_ppb)
+#View(PP)
+
+# joining PP data with field nutrient concentration data
+ambient_nutrients <- left_join(ambient_nutrients, PP, by = "date")
+
+############# Adding in PCPN data
+PCPN <- read_csv("data/main_analysis/PCPN_main.csv")
+
+PCPN$date <- lubridate::mdy(PCPN$date) # formatting date column so that its of date class and not a character
+
+# formatting columns to match main data frame
+PCPN <- PCPN %>%
+  filter(sample_type == "Filtered water") %>% # selecting only rows with water concentration data
+  # calculating %N and %C content of samples using subsample weights and adding a date_chamber column to use when adding to main dataframe
+  mutate(water_particulate_N_ug_L = N_mass_ug/(vol_filtered_ml / 1000), water_particulate_C_ug_L = C_mass_ug/(vol_filtered_ml / 1000)) %>% # calculating water column concentrations of pariculate N and C
+  dplyr::select(date, water_particulate_N_ug_L, water_particulate_C_ug_L)
+#View(PCPN)
+
+# joining PCPN data with field nutrient concentration data
+ambient_nutrients <- left_join(ambient_nutrients, PCPN, by = "date")
+
+
+# choosing only the columns I need
+
+ambient_nutrients <- ambient_nutrients %>%
+  dplyr::select(site_treatment, sample_type, item, NO3_N_py, NH4_N, SRP, DP, date, month, ug_P_per_liter_ppb, water_particulate_N_ug_L, water_particulate_C_ug_L) %>%
+  rename(PP_ug_liter = ug_P_per_liter_ppb) %>%
+  mutate(TP_ug_L = PP_ug_liter + DP)
+
+# exporting dataframe of ambient concentrations only
+write_csv(ambient_nutrients, "data/nutrient_data/in_situ_nutrient_data.csv")
+
+#View(ambient_nutrients)
+
+# converting dataframe form wide to long format
+amb <- ambient_nutrients %>%
+  pivot_longer(cols = c(NO3_N_py, NH4_N, SRP, DP),
+               names_to = "nutrient",
+               values_to = "concentration_ug_L")
+
+# changing order of nutrients for graph
+amb$nutrient <- factor(amb$nutrient, levels = c("DP", "SRP", "NH4_N", "NO3_N_py"))
+
+amb_plot <- amb %>%
+  filter(nutrient != "DP") %>% 
+  ggplot(aes(x = date, y = concentration_ug_L, linetype = nutrient)) +
+  geom_point() +
+  geom_line() +
+  scale_linetype_discrete(name = "Nutrient", labels = expression(SRP, NH[4]-N, NO[3]-N)) +
+  labs(y = expression(Concentration~(paste(mu, "g")~L^{-1})), x = "Date", col = "Nutrient") +
+  theme_classic()
+
+amb_plot
+
+ggsave("plots/nutrient_uptake/ambient_nutrients.jpg", plot = amb_plot, height = 4, width = 7, dpi = 300)
+
+ggsave("plots/final_paper/Figure7.jpg", plot = amb_plot, height = 4, width = 7, dpi = 300)
+```
+
+The nutrient data for the 3/15/21 experiment at Tahoe City was taken from 0.45um-filtered water instead of raw water since all water was mistakenly filtered before nutrient analysis were completed.
+
+# Calculating nutrient uptake rates by temperature
+```{r}
+# dataframe of starting (initial) nutrient concentrations
+bulk <- dat %>%
+  filter(site_treatment == "TPI_TC_Bulk" | site_treatment == "TPI_PNLD_bulk" & chamber != "T_bulk_1") %>% #filtering out T_bulk_1 since this nutrient sample was taken too long before the start of the experiment to be accurate
+  dplyr::select(date, NO3_N_py, NH4_N, SRP, DP) %>% # selecting only nutrient data columns
+  rename(bulk_NO3_N_py = NO3_N_py, bulk_NH4_N = NH4_N, bulk_SRP = SRP, bulk_DP = DP) %>% # renaming columns to indicate these were the initial concentrations for joining to the uptake dataframe
+  slice(-c(6)) # removing 6th row since this was an extra bulk sample taken for the nov 2021 experiment
+
+# added in values for bulk concentrations in excel for 6/13 and 8/8 experiments since these were reported as TNO3, TNH4, TRP, and TP instead of the dissolved concentrations in previous experiments
+
+#View(bulk)
+
+
+
+
+# dataframe of final nutrient concentrations in enriched chambers
+uptake <- dat %>%
+  filter(site_treatment == "TPI_PNLD_E" | site_treatment == "TPI_TC_E") %>%
+  unite(date_chamber, date, chamber, sep = "_", remove = "FALSE") %>% # combining columns so I can assign temperature treatments to each individual row from recorded treatments in experimental notes
+  mutate(
+    temp_C = case_when(
+      date_chamber == "2021-03-15_F_15" |
+        date_chamber == "2021-03-15_F_7"|
+        date_chamber == "2021-03-15_F_6"|
+        date_chamber == "2021-03-15_F_5"|
+        date_chamber == "2021-04-21_F_2"|
+        date_chamber == "2021-04-21_F_5"|
+        date_chamber == "2021-04-21_F_15"|
+        date_chamber == "2021-04-21_F_1" ~ 7,
+      date_chamber == "2021-03-15_F_9"|
+        date_chamber == "2021-03-15_F_1"|
+        date_chamber == "2021-03-15_F_8"|
+        date_chamber == "2021-03-15_F_12"|
+        date_chamber == "2021-04-21_F_11"|
+        date_chamber == "2021-04-21_F_6"|
+        date_chamber == "2021-04-21_F_12"|
+        date_chamber == "2021-04-21_F_14" ~ 10,
+      date_chamber == "2021-03-15_F_3" |
+        date_chamber == "2021-03-15_F_2" |
+        date_chamber == "2021-03-15_F_4" |
+        date_chamber == "2021-03-15_F_10" |
+        date_chamber == "2021-04-21_F_16"|
+        date_chamber == "2021-04-21_F_3"|
+        date_chamber == "2021-04-21_F_10"|
+        date_chamber == "2021-04-21_F_9" ~ 13,
+      date_chamber == "2021-03-15_F_16" |
+        date_chamber == "2021-03-15_F_11" |
+        date_chamber == "2021-03-15_F_13" |
+        date_chamber == "2021-03-15_F_14" |
+        date_chamber == "2021-04-21_F_7"|
+        date_chamber == "2021-04-21_F_13"|
+        date_chamber == "2021-04-21_F_8"|
+        date_chamber == "2021-04-21_F_4" ~ 16,
+      date_chamber == "2021-06-13_F_5"|
+        date_chamber == "2021-06-13_F_9"|
+        date_chamber == "2021-06-13_F_10"|
+        date_chamber == "2021-06-13_F_16" ~ 14.5,
+      date_chamber == "2021-06-13_F_6"|
+        date_chamber == "2021-06-13_F_7"|
+        date_chamber == "2021-06-13_F_13"|
+        date_chamber == "2021-06-13_F_14" ~ 17.5,
+      date_chamber == "2021-06-13_F_3"|
+        date_chamber == "2021-06-13_F_4"|
+        date_chamber == "2021-06-13_F_11"|
+        date_chamber == "2021-06-13_F_15" ~ 20.5,
+      date_chamber == "2021-06-13_F_1"|
+        date_chamber == "2021-06-13_F_2"|
+        date_chamber == "2021-06-13_F_8"|
+        date_chamber == "2021-06-13_F_12" ~ 23.5,
+      date_chamber == "2021-08-08_F_3"|
+        date_chamber == "2021-08-08_F_5"|
+        date_chamber == "2021-08-08_F_7"|
+        date_chamber == "2021-08-08_F_14"|
+        date_chamber == "2021-08-08_F_A_35" ~ 19.5,
+      date_chamber == "2021-08-08_F_1"|
+        date_chamber == "2021-08-08_F_8"|
+        date_chamber == "2021-08-08_F_11"|
+        date_chamber == "2021-08-08_F_12"|
+        date_chamber == "2021-08-08_F_A_37" ~ 22.5,
+      date_chamber == "2021-08-08_F_4"|
+        date_chamber == "2021-08-08_F_9"|
+        date_chamber == "2021-08-08_F_13"|
+        date_chamber == "2021-08-08_F_15"|
+        date_chamber == "2021-08-08_F_A_25" ~ 25.5,
+      date_chamber == "2021-08-08_F_2"|
+        date_chamber == "2021-08-08_F_6"|
+        date_chamber == "2021-08-08_F_10"|
+        date_chamber == "2021-08-08_F_16"|
+        date_chamber == "2021-08-08_F_A_13" ~ 28.5,
+      date_chamber == "2021-10-10_F_1" |
+        date_chamber == "2021-10-10_F_3" |
+        date_chamber == "2021-10-10_F_7" |
+        date_chamber == "2021-10-10_F_8" |
+        date_chamber == "2021-10-10_F_J_45" ~ 18,
+      date_chamber == "2021-10-10_F_5" |
+        date_chamber == "2021-10-10_F_10" |
+        date_chamber == "2021-10-10_F_12" |
+        date_chamber == "2021-10-10_F_15" |
+        date_chamber == "2021-10-10_F_J_13" ~ 15,
+      date_chamber == "2021-10-10_F_2" |
+        date_chamber == "2021-10-10_F_11" |
+        date_chamber == "2021-10-10_F_13" |
+        date_chamber == "2021-10-10_F_14" |
+        date_chamber == "2021-10-10_F_J_28" ~ 21,
+      date_chamber == "2021-10-10_F_4" |
+        date_chamber == "2021-10-10_F_6" |
+        date_chamber == "2021-10-10_F_9" |
+        date_chamber == "2021-10-10_F_16" |
+        date_chamber == "2021-10-10_F_JA_5" ~ 24,
+      date_chamber == "2021-11-28_F_A_13" |
+        date_chamber == "2021-11-28_F_5" |
+        date_chamber == "2021-11-28_F_10" |
+        date_chamber == "2021-11-28_F_12" |
+        date_chamber == "2021-11-28_F_13" ~ 12.5,
+      date_chamber == "2021-11-28_F_A_9" |
+        date_chamber == "2021-11-28_F_3" |
+        date_chamber == "2021-11-28_F_7" |
+        date_chamber == "2021-11-28_F_15" |
+        date_chamber == "2021-11-28_F_16" ~ 9.5,
+      date_chamber == "2021-11-28_F_A_18" |
+        date_chamber == "2021-11-28_F_1" |
+        date_chamber == "2021-11-28_F_2" |
+        date_chamber == "2021-11-28_F_4" |
+        date_chamber == "2021-11-28_F_14" ~ 15.5,
+      date_chamber == "2021-11-28_F_A_38" |
+        date_chamber == "2021-11-28_F_6" |
+        date_chamber == "2021-11-28_F_8" |
+        date_chamber == "2021-11-28_F_9" |
+        date_chamber == "2021-11-28_F_11" ~ 18.5,
+      date_chamber == "2022-02-27_F_J_26" |
+        date_chamber == "2022-02-27_F_1" |
+        date_chamber == "2022-02-27_F_7" |
+        date_chamber == "2022-02-27_F_8" |
+        date_chamber == "2022-02-27_F_12" ~ 9,
+      date_chamber == "2022_02-27_F_J_29" |
+        date_chamber == "2022-02-27_F_2" |
+        date_chamber == "2022-02-27_F_3" |
+        date_chamber == "2022-02-27_F_5" |
+        date_chamber == "2022-02-27_F_11" ~ 6,
+      date_chamber == "2022-02-27_F_J_22" |
+        date_chamber == "2022-02-27_F_6" |
+        date_chamber == "2022-02-27_F_9" |
+        date_chamber == "2022-02-27_F_14" |
+        date_chamber == "2022-02-27_F_15" ~ 12,
+      date_chamber == "2022-02-27_F_J_14" |
+        date_chamber == "2022-02-27_F_4" |
+        date_chamber == "2022-02-27_F_10" |
+        date_chamber == "2022-02-27_F_13" |
+        date_chamber == "2022-02-27_F_16" ~ 15
+    )) # values double-checked by NTF on 3/28/22
+
+#View(uptake)
+
+# joining both the above dataframes (both initial and final nutrient concentrations) to calculate nutrient uptake rates from
+uptake_rates <- left_join(uptake, bulk, by = "date")
+#View(uptake_rates)
+
+# adding in length of incubation period in hours to calculate uptake rates
+# Uptake times for the 3/15, and 4/21 experiments are approximate since the exact start and finish times were not logged
+uptake_rates <- uptake_rates %>%
+  mutate(
+    hrs = case_when(
+      date == "2021-03-15" ~ 24.5,
+      date == "2021-04-21" ~ 25.5,
+      date == "2021-06-13" ~ 11,
+      date == "2021-08-08" ~ 23,
+      date == "2021-10-10" ~ 24,
+      date == "2021-11-28" ~ 24,
+      date == "2022-02-27" ~ 23.5
+      )) %>%
+  mutate(NO3_uptake_ug_N_hr = (bulk_NO3_N_py - NO3_N_py)/hrs, NH4_uptake_ug_N_hr = (bulk_NH4_N - NH4_N)/hrs, SRP_uptake_ug_P_hr = (bulk_SRP - SRP)/hrs, DP_uptake_ug_P_hr = (bulk_DP - DP)/hrs) %>% # calculating uptake rates per hour
+  mutate(NO3_use_ug_N = bulk_NO3_N_py - NO3_N_py, NH4_use_ug_N = bulk_NH4_N - NH4_N, SRP_use_ug_P = bulk_SRP - SRP, DP_use_ug_P = bulk_DP - DP) # calculating drawdown in nutrients
+
+#View(uptake_rates)
+  
+```
+
+# Plotting nutrient uptake rates
+### Figure S3
+```{r}
+# melting dataframe to long format so that uptake rate columns are combined into one column and values are in a separate column so all can be plotted at once
+dat_long <- uptake_rates %>%
+  rename(NO3_rate = NO3_uptake_ug_N_hr, NH4_rate = NH4_uptake_ug_N_hr, SRP_rate = SRP_uptake_ug_P_hr, DP_rate = DP_uptake_ug_P_hr) %>% # renaming columns so that facet labels are more tidy
+  pivot_longer(cols = c(NO3_rate, NH4_rate, SRP_rate, DP_rate),
+               names_to = "uptake_rate_name",
+               values_to = "rates",
+               values_drop_na = TRUE)
+#View(dat_long)
+
+# adding in column to distinguish background jar uptake rates so they're plotted separately from august incubation rates
+dat_long <- dat_long %>%
+  mutate(
+    date_background = case_when(
+      chamber == "F_A_13" |
+        chamber == "F_A_25" |
+        chamber == "F_A_35" |
+        chamber == "F_A_37" ~ "2021-08-08_background_rate",
+      chamber == "F_JA_5" |
+        chamber == "F_J_45" |
+        chamber == "F_J_13" |
+        chamber == "F_J_28" ~ "2021-10-10_background_rate",
+      chamber == "F_A_13" |
+        chamber == "F_A_9" |
+        chamber == "F_A_18" |
+        chamber == "F_A_38" ~ "2021-11-28_background_rate",
+      chamber == "F_J_14" |
+        chamber == "F_J_22" |
+        chamber == "F_J_26" |
+        chamber == "F_J_29" ~ "2022-02-27_background_rate",
+      TRUE ~ as.character(date)
+    )
+  )
+#View(dat_long)
+
+# formatting date column to be a discrete variable for plotting purposes
+dat_long$date <- as.character(dat_long$date)
+
+# plotting nutrient uptake rates
+p <- dat_long %>%
+  ggplot(aes(x = temp_C, y = rates)) +
+  facet_grid(cols = vars(uptake_rate_name)) +
+  geom_point(aes(group = date_chamber, color = date_background)) +
+  geom_smooth(aes(color = date_background), method = "lm") +
+  scale_color_viridis_d("Experiment Date") +
+  theme_bw() +
+  labs(title = "Periphyton Nutrient Uptake Rates vs. Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(Nutrient~Uptake~(ugN/ugP~hr^{-1})))
+p
+
+# making plotly plot to investigate individual datapoints
+p <- plotly::ggplotly(p)
+p
+
+# creating facet labels for plot below
+facet_label_1 <- c("A", "B", "C", "D")
+names(facet_label_1) <- c("DP_rate", "NH4_rate", "NO3_rate", "SRP_rate")
+
+# plotting background nutrient uptake rates for supplemental materials
+#View(dat_long)
+background_nut_uptake <- dat_long %>%
+  filter(grepl("background", date_background)) %>% # filtering only background samples (they contain no periphyton)
+  mutate(month = month(datetime, label = TRUE, abbr = FALSE)) %>% # making column of month character strings
+  ggplot(aes(x = temp_C, y = rates)) +
+  facet_grid(cols = vars(uptake_rate_name), labeller = labeller(uptake_rate_name = facet_label_1)) +
+  geom_point(aes(group = date_chamber, color = month)) +
+  geom_smooth(aes(color = month), method = "lm", se = F) +
+  scale_color_manual(values = c("#0D0887FF", "#FCA636FF", "#E16462FF", "#6A00A8FF")) +
+  theme_bw() +
+  labs(x = expression('Temperature (\u00B0C)'),
+      y = expression(Nutrient~Uptake~(ugN/ugP~hr^{-1}))) +
+  theme(legend.position = "bottom")
+background_nut_uptake
+
+ggsave("plots/nutrient_uptake/background_nut_uptake.jpg", plot = background_nut_uptake, height = 3, width = 7, dpi = 300)
+
+ggsave("plots/final_paper/FigureS3.jpg", plot = background_nut_uptake, height = 3, width = 7, dpi = 300)
+ggsave("plots/final_paper/AppendixD.jpg", plot = background_nut_uptake, height = 3, width = 7, dpi = 300)
+```
+
+Important things to keep in mind: 1) The April experiment had much lower initial nutrient concentrations than the other experiments and nutrients were virtually exhausted in these chambers. 
+2) The June experiment only had an 11-hr incubation, which was about half as long as the ~24hr incubation period in the other experiments
+3) The March 2021 experiment had slightly higher nutrient enrichment concentrations, and the stoichiometry of N & P in the additions were slightly different as well.
+
+# joining nutrient uptake and metabolic dataframes
+```{r}
+# prepping nutrient data for joining to incubation AFDW data
+# creating numeric chamber column in nutrient data and removing the "F_" from individual cells
+dat_long <- dat_long %>%
+  mutate(chamber_num = as.numeric(gsub("F_", "", chamber))) %>% #removing unwanted characters
+  unite(chamber_ID, date, chamber_num, sep = "_", remove = "FALSE") %>% # combining date and chamber number columns for use in joining AFDW data from previous incubations
+  filter(!grepl("A|J", chamber)) # removing data from background nutrient uptake jars
+
+#View(dat_long)
+
+
+# prepping AFDW data for joining
+# creating chamber_ID column same as in above dataframe which will serve as a unique identifier for each chamber in each incubation and will be used to index the joining of the two dataframes
+metab_dat <- read_csv("data/main_analysis/main_rate_data.csv")
+
+metab_dat <- metab_dat %>%
+  mutate(date = c(rep("2021-03-01", 16), rep("2021-03-15", 16), rep("2021-04-07", 16), rep("2021-04-21", 16), rep("2021-06-13", 32), rep("2021-08-08", 32), rep("2021-10-10", 32), rep("2021-11-28", 32), rep("2022-02-27", 32))) %>% # creating date column
+  unite(chamber_ID, date, chamber, sep = "_", remove = "FALSE") %>% # combining date and chamber columns
+  filter(nutrient_trt == "enriched") %>% # selecting only enriched samples to bind to dataframe since ambient samples did not produce the following nutrient uptake rates
+  dplyr::select(chamber_ID, total_AFDW_g_2, rock_SA_m2, GPP_mgO2_d_gAFDW_2, ER_mgO2_d_gAFDW_2, NEP_mgO2_d_gAFDW_2, GPP_mg_d, ER_mg_d, NEP_mg_d) # selecting only the columns I need to declutter dataframe a bit
+
+#View(metab_dat)
+
+
+
+# Joining the nutrient and metab data frames
+main <- left_join(dat_long, metab_dat, by = "chamber_ID")
+#View(main)
+
+
+# calculating AFDW-normalized rates
+main <- main %>%
+  mutate(AFDW_rates = rates/total_AFDW_g_2)
+```
+
+
+# preparing data to merge with main dataframe
+```{r}
+# convert dataframe back to wide format for export
+main_wide <- main %>%
+  dplyr::select(-rates) %>% # removing this column so I can pivot data to wide format based on AFDW_rates column
+  pivot_wider(names_from = uptake_rate_name, values_from = AFDW_rates) %>%
+  mutate(rock_ID = c(17:32, 49:144)) %>%
+  dplyr::select(NO3_N_py, NH4_N, SRP, DP, bulk_NO3_N_py, bulk_NH4_N, bulk_SRP, bulk_DP, NO3_rate:rock_ID) # selecting only the rows I need
+  #View(main_wide)
+
+write_csv(main_wide, "data/nutrient_data/nutrient_data_lahontan.csv")
+```
+
+
+
+# Plotting AFDW-normalized nutrient uptake rates
+## Figure S6.1
+```{r}
+
+# renaming factor levels for graphing purposes
+main$uptake_rate_name <- factor(main$uptake_rate_name, levels = c("NH4_rate", "NO3_rate", "SRP_rate"), labels = c("Ammonium", "Nitrate", "Soluble Reactive Phosphorus")) 
+
+levels(main$uptake_rate_name)
+
+
+# creating a month column to correspond with metabolic rate plots
+main <- main %>%
+  mutate(month = month(datetime, label = T, abbr = F))
+
+#View(main)
+
+# creating labels for facets in plots below
+facet_label <- c("A", "B", "C")
+names(facet_label) <- c("Ammonium", "Nitrate", "Soluble Reactive Phosphorus")
+
+# plotting AFDW_normalized rates
+# plotting nutrient uptake rates
+AFDW <- main %>%
+  filter(date != "2021-04-21" & date != "2021-03-15" & uptake_rate_name != "DP_rate" & AFDW_rates < 600) %>% # filtering out april 2021 data since rates were near zero due to error with nutrient enrichment, filtering out march 2021 data since waterbath temperatures were not held at treatment levels overnight during the incubation period and nutrient uptake rates will not reflect a temperature signal, also filtering out DP data, and filtering out outlier from nov 2021 experiment
+  filter(date_chamber != "2021-11-28_F_15" & date_chamber != "2021-11-28_F_2" & date_chamber != "2021-06-13_F_1") %>% # removing outlier datapoints for november and june rates
+  mutate(AFDW_rates_2 = ifelse(AFDW_rates < 0, 0, AFDW_rates)) %>% # making negative uptake rate values for NO3 be zeros
+  ggplot(aes(x = temp_C, y = AFDW_rates_2)) +
+  facet_grid(cols = vars(uptake_rate_name), labeller = labeller(uptake_rate_name = facet_label)) +
+  geom_point(aes(group = date_chamber, color = month)) +
+  geom_smooth(aes(color = month), method = "lm", se = F) +
+   scale_color_manual("Experiment Date", values = c("#0D0887FF","#B12A90FF", "#FCA636FF", "#E16462FF", "#6A00A8FF")) +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  labs(x = expression('Temperature (\u00B0C)'),
+      y = expression(Nutrient~Uptake~(ugN/ugP~gAFDW^{-1}~hr^{-1})))
+AFDW
+
+ggsave("plots/nutrient_uptake/AFDW_norm_uptake_rates.jpg", plot = AFDW, width = 7, height = 4, dpi = 300)
+
+ggsave("plots/final_paper/FigureH1.jpg", plot = AFDW, width = 7, height = 4, dpi = 300)
+ggsave("plots/final_paper/FigureS6_1.jpg", plot = AFDW, width = 7, height = 4, dpi = 300)
+
+
+# simplified plot for plotly
+AFDW_plotly <- main %>%
+  filter(date != "2021-04-21" & date != "2021-03-15" & uptake_rate_name != "DP_rate" & AFDW_rates < 600) %>% # filtering out april 2021 data since rates were near zero due to error with nutrient enrichment, filtering out march 2021 data since waterbath temperatures were not held at treatment levels overnight during the incubation period and nutrient uptake rates will not reflect a temperature signal, also filtering out DP data, and filtering out outlier from nov 2021 experiment
+  mutate(AFDW_rates_2 = ifelse(AFDW_rates < 0, 0, AFDW_rates)) %>% # making negative uptake rate values for NO3 be zeros
+  ggplot(aes(x = temp_C, y = AFDW_rates_2)) +
+  facet_grid(cols = vars(uptake_rate_name)) +
+  geom_point(aes(group = date_chamber, color = month)) +
+  geom_smooth(aes(color = month), method = "lm", se = F) +
+  scale_color_viridis_d("Experiment Date") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+AFDW_plotly
+
+p <- plotly::ggplotly(AFDW_plotly)
+p
+
+  
+```
+
+# Comparing Reuter et al. 1986 uptake rates
+I used the above plotly plot to assess the average NH4 and NO3 uptake rates (using the trendlines) for samples ~7c in february experiments and 19C in august experiments (these coincide with sampling dates and temperatures used in Reuter et al 1986's nutrient uptake experiments) and compared NH4 and NO3 uptake rates to see if they were on par with each other. The NH4 uptake rates of the february experiment at ~7C were 19ugNH4-N gAFDW hr, which is near Reuter's value of ~16-17ugNH4-N gAFDW hr at a concentration of 400ug/L in the march experiment. NO3 uptake rates in the february experiment at 7C were ~4ugNO3-N gAFDW hr, which is slightly lower than Reuter's value of 12-13 at a concentration of 400ug NO3-N/L during february. Average august NH4-N uptake rates were ~69ugNH4-N gAFDW hr at 19.5C, while Reuter's rates were ~23ugNH4-N gAFDW hr under these same conditions. Average august NO3 uptake rates were ~3.5ugNO3-N gAFDW hr while Ruters rates were ~20ugNO3-N gAFDW hr under these same conditions.
+
+
+
+# Metabolic rates vs nutrient uptake
+Trying to assess if nutrient uptake rates are correlated to metabolic rates to see if energy allocation to nutrient uptake led to depressed production and increased respiration in periphyton.
+```{r}
+# making a function to apply to metabolic rate columns to biomass normalize them and convert from daily to hourly rates
+daily_to_hourly <- function(x) {
+  x/24
+}
+
+main2 <- main %>%
+  mutate_at(vars(matches("_mgO2_d_gAFDW_2")), daily_to_hourly) %>% 
+  filter(date != "2021-04-21" & date != "2021-03-15" & uptake_rate_name != "DP_rate" & AFDW_rates < 600) %>% # filtering out april 2021 data since rates were near zero due to error with nutrient enrichment, filtering out march 2021 data since waterbath temperatures were not held at treatment levels overnight during the incubation period and nutrient uptake rates will not reflect a temperature signal, also filtering out DP data, and filtering out outlier from nov 2021 experiment
+  filter(date_chamber != "2021-11-28_F_15" & date_chamber != "2021-11-28_F_2" & date_chamber != "2021-06-13_F_1") %>% # removing outlier datapoints for november and june rates
+  mutate(AFDW_rates_2 = ifelse(AFDW_rates < 0, 0, AFDW_rates)) %>% # making negative uptake rate values for NO3 be zeros
+  ggplot(aes(x = AFDW_rates_2, y = GPP_mgO2_d_gAFDW_2)) +
+  facet_grid(cols = vars(uptake_rate_name), labeller = labeller(uptake_rate_name = facet_label)) +
+  geom_point(aes(group = date_chamber, color = month)) +
+  geom_smooth(aes(color = month), method = "lm", se = F) +
+   scale_color_manual("Experiment Date", values = c("#0D0887FF","#B12A90FF", "#FCA636FF", "#E16462FF", "#6A00A8FF")) +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  labs(x = expression(Nutrient~Uptake~(ugN/ugP~gAFDW^{-1}~hr^{-1})),
+      y = expression(GPP~(mgO[2]~day^{-1}~gAFDW^{-1})))
+  
+main2
+
+
+main3 <- main %>%
+  mutate_at(vars(matches("_mgO2_d_gAFDW_2")), daily_to_hourly) %>% 
+  filter(date != "2021-04-21" & date != "2021-03-15" & uptake_rate_name != "DP_rate" & AFDW_rates < 600) %>% # filtering out april 2021 data since rates were near zero due to error with nutrient enrichment, filtering out march 2021 data since waterbath temperatures were not held at treatment levels overnight during the incubation period and nutrient uptake rates will not reflect a temperature signal, also filtering out DP data, and filtering out outlier from nov 2021 experiment
+  filter(date_chamber != "2021-11-28_F_15" & date_chamber != "2021-11-28_F_2" & date_chamber != "2021-06-13_F_1") %>% # removing outlier datapoints for november and june rates
+  mutate(AFDW_rates_2 = ifelse(AFDW_rates < 0, 0, AFDW_rates)) %>% # making negative uptake rate values for NO3 be zeros
+  ggplot(aes(x = AFDW_rates_2, y = ER_mgO2_d_gAFDW_2)) +
+  facet_grid(cols = vars(uptake_rate_name), labeller = labeller(uptake_rate_name = facet_label)) +
+  geom_point(aes(group = date_chamber, color = month)) +
+  geom_smooth(aes(color = month), method = "lm", se = F) +
+   scale_color_manual("Experiment Date", values = c("#0D0887FF","#B12A90FF", "#FCA636FF", "#E16462FF", "#6A00A8FF")) +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  labs(x = expression(Nutrient~Uptake~(ugN/ugP~gAFDW^{-1}~hr^{-1})),
+      y = expression(ER~(mgO[2]~day^{-1}~gAFDW^{-1})))
+
+main3
+
+
+main4 <- main %>%
+  mutate_at(vars(matches("_mgO2_d_gAFDW_2")), daily_to_hourly) %>% 
+  filter(date != "2021-04-21" & date != "2021-03-15" & uptake_rate_name != "DP_rate" & AFDW_rates < 600) %>% # filtering out april 2021 data since rates were near zero due to error with nutrient enrichment, filtering out march 2021 data since waterbath temperatures were not held at treatment levels overnight during the incubation period and nutrient uptake rates will not reflect a temperature signal, also filtering out DP data, and filtering out outlier from nov 2021 experiment
+  filter(date_chamber != "2021-11-28_F_15" & date_chamber != "2021-11-28_F_2" & date_chamber != "2021-06-13_F_1") %>% # removing outlier datapoints for november and june rates
+  mutate(AFDW_rates_2 = ifelse(AFDW_rates < 0, 0, AFDW_rates)) %>% # making negative uptake rate values for NO3 be zeros
+  ggplot(aes(x = AFDW_rates_2, y = NEP_mgO2_d_gAFDW_2)) +
+  facet_grid(cols = vars(uptake_rate_name), labeller = labeller(uptake_rate_name = facet_label)) +
+  geom_point(aes(group = date_chamber, color = month)) +
+  geom_smooth(aes(color = month), method = "lm", se = F) +
+   scale_color_manual("Experiment Date", values = c("#0D0887FF","#B12A90FF", "#FCA636FF", "#E16462FF", "#6A00A8FF")) +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  labs(x = expression(Nutrient~Uptake~(ugN/ugP~gAFDW^{-1}~hr^{-1})),
+      y = expression(NEP~(mgO[2]~day^{-1}~gAFDW^{-1})))
+
+main4
+```
+
+
+
+
+
+
+# In-situ nutrient uptake rates
+## Figure 5
+```{r}
+control_uptake <- main %>%
+  filter(!is.na(uptake_rate_name) & month != "March" & month != "April") %>% # filtering out DP uptake data and march and april experiments
+  filter(temp_C == 6 | temp_C == 7 | temp_C == 14.5 | temp_C == 19.5 | temp_C == 9.5 | temp_C == 15 & month == "October") %>% # filtering only data corresponding to in-situ temperatures for each experiment
+  group_by(uptake_rate_name, month, date) %>% # grouping data by nutrient uptake type and month
+  summarise(avg_uptake = mean(AFDW_rates), sd_uptake = sd(AFDW_rates)) %>% # obtaining an average nutrient uptake rate for each nutrient type and each month
+  arrange(avg_uptake)
+
+# formatting date column from a character class to a datetime
+control_uptake$date <- as_date(control_uptake$date)
+
+# making bounds for x axis in plot below
+min <- as.Date("2021-06-01")
+max <- as.Date("2022-04-01")
+
+
+# making plot
+control_uptake_plot <- control_uptake %>%
+  ggplot(aes(x = date, y = avg_uptake, group = uptake_rate_name, linetype = uptake_rate_name)) +
+  scale_linetype_discrete(name = "", labels = expression(NH[4], NO[3], SRP)) +
+  geom_point() +
+  geom_pointrange(aes(ymin = avg_uptake - sd_uptake, ymax = avg_uptake + sd_uptake)) +
+  geom_line() +
+  labs(x = "Date", y = expression(Nutrient~Uptake~(ugN/ugP~gAFDW^{-1}~hr^{-1}))) +
+  scale_x_date(date_labels = "%b %Y", limits = c(min, max)) +
+  theme_classic() +
+  theme(legend.key.width = unit(2.5, "line"))
+
+control_uptake_plot
+
+ggsave("plots/nutrient_uptake/control_nutrient_uptake_rate.jpg", plot = control_uptake_plot, height = 4, width = 7, dpi = 300)
+
+ggsave("plots/final_paper/Figure5.jpg", plot = control_uptake_plot, height = 4, width = 7, dpi = 300)
+```
+
+
+# In-situ nutrient uptake vs. ambient nutrient concentrations
+## Figure S5
+```{r}
+#View(dat)
+
+# adding up nutrient concentrations (NO3, NH4, and SRP) and getting in-situ nutrient uptake rates
+control_uptake <- main %>%
+  filter(!is.na(uptake_rate_name) & month != "March" & month != "April") %>% # filtering out DP uptake data and march and april experiments
+  filter(temp_C == 6 | temp_C == 7 | temp_C == 14.5 | temp_C == 19.5 | temp_C == 9.5 | temp_C == 15 & month == "October") %>% # filtering only data corresponding to in-situ temperatures for each experiment
+  group_by(uptake_rate_name, month, date) %>% # grouping data by nutrient uptake type, month, and ambient nutrients
+  summarise(avg_uptake = mean(AFDW_rates), sd_uptake = sd(AFDW_rates)) %>% # obtaining an average nutrient uptake rate for each nutrient type and each month
+  arrange(avg_uptake)
+
+control_uptake
+
+# prepping ambient nutrients dataframe for joining
+ambient_subset <- ambient_nutrients %>%
+  mutate(NH4_N_pos = ifelse(NH4_N < 0, 1, NH4_N)) %>% # changing negative NH4 value to be half of the method detection limit (2ug/L) since negative values are not possible 
+  dplyr::select(NH4_N_pos, NO3_N_py, SRP, month) %>% # selecting only the columns I need
+  rename(NH4_N_amb = NH4_N_pos, NO3_N_amb = NO3_N_py, SRP_amb = SRP) %>% # renaming columns so they're not duplicate names in the join
+#View(ambient_subset)
+  filter(month != "March" & month != "April")
+
+# combining ambient nutrients dataframe and control nutrient uptake rates dataframe by the month column so that ambient nutrient concentrations are matched with their respective nutrient uptake rates
+
+combo <- full_join(control_uptake, ambient_subset, by = "month")
+
+# formatting date column from a character class to a datetime
+combo$date <- as_date(combo$date)
+
+# creating a nutrient column of NO3, NH4, and SRP concentrations added together
+combo <- combo %>%
+  mutate(N_conc = NH4_N_amb + NO3_N_amb)
+
+#View(combo)
+
+# nutrient uptake rates as a function of ambient nitrogen concentrations
+NO3_plot <- combo %>%
+  ggplot(aes(x = NO3_N_amb, y = avg_uptake, linetype = uptake_rate_name, group = uptake_rate_name)) +
+ scale_linetype_discrete(name = "", labels = expression(NH[4], NO[3], SRP)) +
+  geom_point() +
+  geom_pointrange(aes(ymin = avg_uptake - sd_uptake, ymax = avg_uptake + sd_uptake)) +
+  geom_line() +
+  labs(x = expression(NO[2]~+~NO[3]~concentration~(paste(mu, "g")~L^{-1})), y = "") +
+  theme_classic() +
+  theme(legend.position = "")
+
+# nutrient uptake rates as a function of ambient SRP concentrations
+P_plot <- combo %>%
+  ggplot(aes(x = SRP_amb, y = avg_uptake, linetype = uptake_rate_name, group = uptake_rate_name)) +
+ scale_linetype_discrete(name = "Nutrient", labels = expression(NH[4], NO[3], SRP)) +
+  geom_point() +
+  geom_pointrange(aes(ymin = avg_uptake - sd_uptake, ymax = avg_uptake + sd_uptake)) +
+  geom_line() +
+  labs(x = expression(SRP~concentration~(paste(mu, "g")~L^{-1})), y = "") +
+  theme_classic()
+
+# nutrient uptake rates as a function of ambient NH4 concentrations
+
+NH4_plot <- combo %>%
+  ggplot(aes(x = NH4_N_amb, y = avg_uptake, linetype = uptake_rate_name, group = uptake_rate_name)) +
+ scale_linetype_discrete(name = "", labels = expression(NH[4], NO[3], SRP)) +
+  geom_point() +
+  geom_pointrange(aes(ymin = avg_uptake - sd_uptake, ymax = avg_uptake + sd_uptake)) +
+  geom_line() +
+  labs(x = expression(NH[4]~concentration~(paste(mu, "g")~L^{-1})), y = expression(Nutrient~Uptake~(paste(mu, "g")~N/paste(mu, "g")~P~gAFDW^{-1}~hr^{-1}))) +
+  theme_classic() +
+  theme(legend.position = "")
+
+# combining plots into one
+library(patchwork)
+uptake_v_amb_nuts <- NH4_plot + NO3_plot + P_plot
+
+ggsave("plots/nutrient_uptake/nut_uptake_vs_amb_nuts.jpg", plot = uptake_v_amb_nuts, height = 4, width = 18, dpi = 300)
+
+ggsave("plots/final_paper/FigureS5.jpg", plot = uptake_v_amb_nuts, height = 4, width = 18, dpi = 300)
+ggsave("plots/final_paper/Appendix7.jpg", plot = uptake_v_amb_nuts, height = 4, width = 18, dpi = 300)
+
+# saving plots
+ggsave("plots/nutrient_uptake/nut_uptake_vs_NO3.png", plot = NO3_plot, height = 4, width = 6, dpi = 300)
+
+ggsave("plots/nutrient_uptake/nut_uptake_vs_P.png", plot = P_plot, height = 4, width = 6, dpi = 300)
+
+ggsave("plots/nutrient_uptake/nut_uptake_vs_NH4.png", plot = NH4_plot, height = 4, width = 6, dpi = 300)
+```
+
+
+
+# Molar nutrient uptake plot
+## Figure S6.2
+## Supplemental: Nutrients and Oxygen Mass Balance 
+```{r}
+#View(main)
+molar <- main %>%
+  filter(uptake_rate_name != "DP_rate" & AFDW_rates <600) %>% # filtering out DP uptake rates since chemical there is no single chemical formula for this P species to calculate molar uptake rate with, also filtering out outlier from nov 2021 experiment
+  mutate(AFDW_rates_2 = ifelse(AFDW_rates < 0, 0, AFDW_rates)) %>% # making negative uptake rate values for NO3 be zeros
+  mutate(molar_rate = case_when(
+    uptake_rate_name == "Ammonium" ~ AFDW_rates_2/14.0067e6,
+    uptake_rate_name == "Soluble Reactive Phosphorus" ~ AFDW_rates_2/30.9738e6,
+    uptake_rate_name == "Nitrate" ~ AFDW_rates_2/14.0067e6
+  )) %>%
+  mutate(molar_rate_d = molar_rate*1e6) # converting from moles to micro-moles
+
+
+# Supplemental Oxygen Balance Exercise
+# investigating maxuptake rates
+max_hourly_rates <- molar %>% 
+  select(uptake_rate_name, molar_rate_d, hrs, date_chamber, total_AFDW_g_2, ER_mgO2_d_gAFDW_2, GPP_mgO2_d_gAFDW_2, NEP_mgO2_d_gAFDW_2) %>% 
+  mutate(molar_rate_hr_chamber = molar_rate_d * total_AFDW_g_2) %>% # converting from biomass specific molar nutrient uptake rate to total nutrient uptake rate per chamber
+  select(-molar_rate_d) %>% 
+  pivot_wider(names_from = uptake_rate_name, values_from = molar_rate_hr_chamber) %>% 
+  mutate(ER_mg_O2_hr_chamber = ER_mgO2_d_gAFDW_2/24*total_AFDW_g_2,
+         GPP_mg_O2_hr_chamber = GPP_mgO2_d_gAFDW_2/24*total_AFDW_g_2,
+         NEP_mg_O2_hr_chamber = NEP_mgO2_d_gAFDW_2/24*total_AFDW_g_2) %>% 
+  filter(Ammonium == max(Ammonium) | Ammonium == min(Ammonium) | Nitrate == max(Nitrate) | Nitrate == min(Nitrate))
+
+
+#View(molar)
+
+# creating labels for facets in plot below
+facet_label <- c("A", "B", "C")
+names(facet_label) <- c("Ammonium", "Nitrate", "Soluble Reactive Phosphorus")
+
+# plotting molar uptake rates per gAFDW of periphyton
+AFDW_molar <- molar %>%
+  filter(date != "2021-04-21" & date != "2021-03-15") %>% # removing april 2021 experiment data since nutrient enrichment conc. was too low and march 2021 data since treatment temperatures were not applied to the samples during the entire nutrient pre-incubation period
+   filter(date_chamber != "2021-11-28_F_15" & date_chamber != "2021-11-28_F_2" & date_chamber != "2021-06-13_F_1") %>% # removing outlier datapoints for november and june rates
+  ggplot(aes(x = temp_C, y = molar_rate_d)) +
+  facet_grid(cols = vars(uptake_rate_name), labeller = labeller(uptake_rate_name = facet_label)) +
+  geom_point(aes(group = date_chamber, color = month)) +
+  geom_smooth(aes(color = month), method = "lm", se = F) +
+  scale_color_manual("Experiment Date", values = c("#0D0887FF","#B12A90FF", "#FCA636FF", "#E16462FF", "#6A00A8FF")) +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  labs(x = expression('Temperature (\u00B0C)'),
+      y = expression(Nutrient~Uptake~(mu * mol~ gAFDW^{-1}~hr^{-1})))
+AFDW_molar
+
+ggsave("plots/nutrient_uptake/molar_AFDW_norm_uptake_rates.jpg", plot = AFDW_molar, width = 7, height = 4, dpi = 300)
+
+ggsave("plots/final_paper/FigureS6_2.jpg", plot = AFDW_molar, width = 7, height = 4, dpi = 300)
+ggsave("plots/final_paper/Appendix8.2.jpg", plot = AFDW_molar, width = 7, height = 4, dpi = 300)
+
+# log-transformed plot of molar uptake rates per gAFDW of periphyton
+log_AFDW_molar <- molar %>%
+  ggplot(aes(x = temp_C, y = (molar_rate + 0.001))) + # adding a small number to prevent negative values while doing a log-transformation
+  scale_y_log10() +
+  facet_grid(cols = vars(uptake_rate_name)) +
+  geom_point(aes(group = date_chamber, color = date_background)) +
+  geom_smooth(aes(color = date_background), method = "lm") +
+  scale_color_viridis_d("Experiment Date") +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  labs(title = "AFDW-Normalized Periphyton Nutrient Uptake Rates vs. Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(log(Nutrient~Uptake~(mol~gAFDW^{-1}~hr^{-1}))))
+log_AFDW_molar
+
+
+
+# plot of log transformed NH4 uptake alone
+
+NH4_molar <- molar %>%
+  filter(uptake_rate_name == "Ammonium" & date != "2021-04-21") %>%
+  ggplot(aes(x = temp_C, y = molar_rate)) +
+  geom_point(aes(group = date_chamber, color = date_background)) +
+  geom_smooth(aes(color = date_background), method = "lm") +
+  scale_color_viridis_d("Experiment Date") +
+  scale_y_log10() +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  labs(title = "AFDW-Normalized Periphyton NH4 Uptake Rates vs. Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(log(Nutrient~Uptake~(mol~gAFDW^{-1}~hr^{-1}))))
+
+NH4_molar
+
+# plot of log transformed SRP uptake alone
+SRP_molar <- molar %>%
+  filter(uptake_rate_name == "Soluble Reactive Phosphorus") %>%
+  ggplot(aes(x = temp_C, y = molar_rate)) +
+  geom_point(aes(group = date_chamber, color = date_background)) +
+  geom_smooth(aes(color = date_background), method = "lm") +
+  scale_color_viridis_d("Experiment Date") +
+  scale_y_log10() +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  labs(title = "AFDW-Normalized Periphyton SRP Uptake Rates vs. Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(log(Nutrient~Uptake~(mol~gAFDW^{-1}~hr^{-1}))))
+
+SRP_molar
+
+```
+
+# Molar ratio of nutrient uptake plot
+## Figure S7
+```{r}
+#View(uptake_rates)
+molar_ratio <- uptake_rates %>%
+  filter(!grepl("A|J", chamber)) %>% # removing data from background nutrient uptake jars
+  mutate(NO3_uptake_mol_hr = NO3_uptake_ug_N_hr/14.0067e6, NH4_uptake_mol_hr = NH4_uptake_ug_N_hr/14.0067e6, SRP_uptake_mol_hr = SRP_uptake_ug_P_hr/30.9738e6)
+
+molar_ratio <- molar_ratio %>%
+  mutate(uptake_N_P_mol_ratio = (NO3_uptake_mol_hr + NH4_uptake_mol_hr)/SRP_uptake_mol_hr)
+
+head(molar_ratio)
+#View(molar_ratio)
+
+# making date and month column a factor for plotting with discrete color scale
+class(molar_ratio$date)
+molar_ratio$date <- as.factor(molar_ratio$date)
+molar_ratio$month <- as.factor(month(molar_ratio$date, label = T, abbr = F))
+#View(molar_ratio)
+
+mol_ratio_plot <- molar_ratio %>%
+  filter(uptake_N_P_mol_ratio < 10 & uptake_N_P_mol_ratio > 0 & date != "2021-04-21" & date != "2021-03-15") %>% # filtering out outliers from aug 2021 experiment, all data from april 2021 experiment data (nutrient levels were off), and all data from march 2021 experiment (temperature treatments were not maintained during whole nutrient incubation).
+  ggplot(aes(x = temp_C, y = uptake_N_P_mol_ratio)) +
+  geom_point(aes(group = date_chamber, color = month)) +
+  geom_smooth(aes(color = month), method = "lm", se = F) + # removing error ribbons from trendlines
+   scale_color_manual("Experiment Date", values = c("#0D0887FF","#B12A90FF", "#FCA636FF", "#E16462FF", "#6A00A8FF")) +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  labs(x = expression('Temperature (\u00B0C)'),
+      y = expression(Nutrient~Uptake~Molar~Ratio~(mol~N:mol~P)))
+mol_ratio_plot
+
+ggsave("plots/nutrient_uptake/uptake_molar_ratio.jpg", plot = mol_ratio_plot, width = 7, height = 4, dpi = 300)
+
+ggsave("plots/final_paper/FigureS7.jpg", plot = mol_ratio_plot, width = 7, height = 4, dpi = 300)
+ggsave("plots/final_paper/Appendix9.jpg", plot = mol_ratio_plot, width = 7, height = 4, dpi = 300)
+```
+
+
+# Nutrient Use Efficiency
+## Figure 6
+```{r}
+#View(main)
+# changing rate names back to compatible column names for R
+main$uptake_rate_name <- factor(main$uptake_rate_name, levels = c("Ammonium", "Nitrate", "Soluble Reactive Phosphorus"), labels = c("NH4_rate", "NO3_rate", "SRP_rate"))
+
+UE <- main %>%
+  group_by(chamber_ID) %>%
+  dplyr::select(-AFDW_rates) %>% #removing this column of AFDW normalized rates
+  tidyr::pivot_wider(names_from = "uptake_rate_name",
+             values_from = "rates") %>% # pivoting data from long to wide format so each nutrient uptake rate type has it's own column
+  mutate(NH4_uptake_mol_d = 24 * NH4_rate/14.0067e6,
+    SRP_uptake_mol_d = 24 * SRP_rate/30.9738e6,
+    NO3_uptake_mol_d = 24 * NO3_rate/14.0067e6
+  ) # converting raw nutrient uptake rates from ug per hour to moles per day
+
+UE <- UE %>%
+ mutate(NUE = (NEP_mg_d/1000/(15.999 * 2)) / (NH4_uptake_mol_d + NO3_uptake_mol_d), PUE = (NEP_mg_d/1000/(15.999 * 2)) / SRP_uptake_mol_d) %>% # converting NEP from mg O2 per day to mol O2 per day and then dividing by mol of N/P per day in order to calculate N and P use efficiency
+  filter(!is.na(NUE))
+
+#View(UE)
+
+# plotting NUE vs temperature to assess how temperature affects nutrient use efficiency
+
+UE %>%
+  ggplot(aes(x = temp_C, y = NUE), group = month) +
+  geom_point(aes(shape = month), color = "orange") +
+  geom_smooth(aes(shape = month), method = "lm", color = "orange") +
+  geom_point(aes(x = temp_C, y = PUE, shape = month), color = "purple") +
+  geom_smooth(aes(x = temp_C, y = PUE, shape = month), method = "lm", color = "purple") +
+  labs(x = expression('Temperature (\u00B0C)'),
+       y = expression(Nutrient~Use~Efficiency~(mol~O2:mol~N/P))) +
+  theme_minimal()
+
+# restructuring data from wide into long format in order to plot NUE and PUE at the same time
+UE_long <- UE %>%
+  tidyr::pivot_longer(cols = c(NUE, PUE),
+                       names_to = "parameter",
+                       values_to = "value")
+
+UE_long$parameter <- factor(UE_long$parameter, levels = c("NUE", "PUE"), labels = c("Nitrogen Use Efficiency", "Phosphorus Use Efficiency")) # renaming factor levels for graphing purposes
+levels(UE_long$parameter)
+
+#View(UE_long)
+
+# facet labels for the plot below
+facet_label <- c("a", "b")
+names(facet_label) <- c("Nitrogen Use Efficiency", "Phosphorus Use Efficiency")
+
+# regression parsed out by experiment
+UE_plot <- UE_long %>%
+  filter(month != "March" & month != "April") %>% # filtering out april and march experiment data due to issues with nutrient enrichment levels or maintaining temperature
+  ggplot(aes(x = temp_C, y = value, color = month, group = interaction(month, parameter))) +
+  facet_grid(cols = vars(parameter), #labeller = labeller(parameter = facet_label)
+             ) +
+  geom_point() +
+  scale_y_log10()+
+  geom_smooth(aes(color = month), method = "lm", se = FALSE) +
+  labs(x = expression('Temperature (\u00B0C)'),
+       y = expression(mol~O[2]:mol~N~o*r~P)) +
+  scale_color_manual(values = c("#0D0887FF","#B12A90FF", "#FCA636FF", "#E16462FF", "#6A00A8FF")) +
+  theme_bw() +
+  theme(legend.position = "bottom")
+UE_plot
+
+
+ggsave("plots/nutrient_uptake/nutrient_use_eff.jpg", plot = UE_plot, height = 4, width = 6, dpi = 300)
+
+ggsave("plots/final_paper/Figure6.jpg", plot = UE_plot, height = 4, width = 6, dpi = 300)
+
+# simplified plot for plotly
+UE_plotly <- UE_long %>%
+  filter(month != "March" & month != "April") %>% # filtering out april and march experiment data due to issues with nutrient enrichment levels or maintaining temperature
+  ggplot(aes(x = temp_C, y = value, color = month, group = interaction(month, parameter))) +
+  facet_grid(cols = vars(parameter)) +
+  geom_point() +
+  geom_smooth(aes(color = month), method = "lm", se = FALSE) +
+  scale_color_viridis_d() +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+p <- plotly::ggplotly(UE_plotly)
+p
+
+# regression on aggregated data
+UE_long %>%
+  ggplot(aes(x = temp_C, y = value, color = parameter, group = parameter)) +
+  geom_point() +
+  geom_smooth(aes(color = parameter), method = "lm") +
+  labs(x = expression('Temperature (\u00B0C)'),
+       y = expression(Nutrient~Use~Efficiency~(mol~O2:mol~N/P))) +
+  theme_minimal()
+```
+
+Nutrient-use efficiency calculation methods:
+
+I took NEP measurements (in mg O2 per day) of enriched periphyton samples only and converted them to mol O2 per day; I then took NH4, NO3, and SRP uptake rates (in ug N or ug P per hr) and converted them to mol N or mol P per day. I then calculated Nitrogen use efficiency by dividing the NEP of each chamber by the addition of both NH4 and NO3 uptake (in mol N per day). I calculated phosphorus use efficiency by doing the same, except dividing by the SRP uptake rate (in mol P per day). The nutrient uptake rates were mainly dark uptake rates (periphyton samples were only exposed to 1-1.5 hrs of light during the uptake period) and thus may not truly reflect the light nutrient uptake rates needed for proper determination of nutrient use efficiency, but the data can still be used to compare relative changes in order to detect patterns in nutrient use efficiency with temperature.
+
+
+NUE Interpretation: 
+
+Nutrient use efficiency for both N and P looks like it increases with temperature when the data is split up by individual experiments, but this pattern falls apart when data is agregated together as there is actually a negative trend in nutrient use efficiency with temp. The first finding is in agreement with the literature as NUE is expected to increase with temp (Cross et al. 2015 pp. 1036), but it is in disagreement with Oleksy et al. 2021 NUE patterns which show a negative correlation with temperature. N- Use efficiency is mainly driven by NH4 uptake (NO3 was barely used by phytoplankton) and this is a passive transport process into algal cells rather than active and is thus less affected by temperature increases (Reay et al. 1999) which is supported by our data.

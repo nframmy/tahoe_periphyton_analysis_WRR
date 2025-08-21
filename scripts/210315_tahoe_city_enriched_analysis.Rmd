@@ -1,0 +1,1172 @@
+---
+title: "210315 Tahoe city Enriched Analysis"
+author: "Nick Framsted"
+date: "3/18/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(ggpubr)
+library(plotly)
+library(reshape2)
+library(DescTools)
+
+# changing working directory from /scripts to /tahoe_lab_inc_analysis
+knitr::opts_knit$set(root.dir = '..')
+```
+
+# Importing and Processing data
+```{r, include = FALSE}
+# importing and cleaning up DO data
+dat <- read_csv("data/210315_tahoecity_enriched_inc/210316_DO_tahoecity_inc_enriched_R.csv", skip = 1)
+#str(dat)
+#View(dat)
+
+
+# filtering out rows with error codes, and adding in chamber numbers based the tank and channel number cross referenced against incubation notes
+dat_2 <- dat %>%
+  filter(Error == 0) %>%
+  mutate(chamber = ifelse(SensorID == "125448721", "Chamber 16", ifelse(SensorID == "175401527", "Chamber 13", ifelse(SensorID == "141697176", "Chamber 14", ifelse(SensorID == "190253489", "Chamber 11", ifelse(SensorID == "182196134", "Chamber 9", ifelse(SensorID == "848546098", "Chamber 1", ifelse(SensorID == "50027230", "Chamber 8", ifelse(SensorID == "172345502", "Chamber 12", ifelse(SensorID == "126217967", "Chamber 15", ifelse(SensorID == "175334401", "Chamber 6", ifelse(SensorID == "814963468", "Chamber 7", ifelse(SensorID == "458949207", "Chamber 5", ifelse(SensorID == "24319898", "Chamber 2", ifelse(SensorID == "135332981", "Chamber 3", ifelse(SensorID == "162832118", "Chamber 4", "Chamber 10"))))))))))) ))))) %>%
+  mutate(treatment = ifelse(Temp > 6 & Temp < 9, "7C", ifelse(Temp > 8 & Temp < 12, "10C", ifelse(Temp > 12 & Temp < 15, "13C", "16C"))))
+
+head(dat_2)
+
+# double checking this worked
+#View(dat_2 %>% select(Channel, Device_Serial, chamber))
+
+# looks like it worked, all chambers are assigned to the correct rows
+
+# renaming oxygen data column and the delta_T columns to include units
+dat_2 <- dat_2 %>%
+  rename(oxygen = Value, delta_T_min = delta_t, time = Time, date = Date, temp = Temp)
+head(dat_2)
+
+
+# selecting only columns I need
+dat_subset <- dat_2 %>%
+  select(date, time, delta_T_min, oxygen, temp, chamber, treatment)
+
+# importing in other complementary data associated with chambers
+dat_chambers <- read_csv("data/210315_tahoecity_enriched_inc/chamber_wts_enriched_R.csv")
+str(dat_chambers)
+#View(dat_chambers)
+
+# joining DO data and chamber data by "chamber" column
+dat_full <- full_join(dat_subset, dat_chambers, by = "chamber")
+#View(dat_full)
+# converting oxygen concentration (mg/L) to oxygen mass (mg) by multipying by water volumes in chambers
+dat_full <- dat_full %>%
+  mutate(oxygen_mass_mg = oxygen * water_volume_L)
+```
+
+
+
+## Plotting DO and temp in chambers
+```{r echo = FALSE}
+# making treatment a factor variable and re-ordering it for plots
+dat_full$treatment <- factor(dat_subset$treatment, levels = c("7C", "10C", "13C", "16C"))
+
+# plotting Do concentrations in each chamber
+DO_conc_plot <- dat_full %>%
+  ggplot(aes(x = delta_T_min, y = oxygen, color = chamber)) +
+  geom_line(size = 1.5) +
+  scale_color_viridis_d() +
+  facet_wrap(~treatment) +
+  labs(y = expression(Oxygen~Concentration~(mg~L^{-1})), x = "Elapsed Time (min)", title = "Tahoe City Incubation DO") +
+  theme_bw(base_size = 20)
+
+DO_conc_plot
+
+ggsave("plots/210315_tahoecity_enriched/210315_tahoecity_DO_conc_plot.png", plot = DO_conc_plot, width = 10, height = 7)
+
+# plotting temperature for each chamber
+temp_plot <- dat_full %>%
+  ggplot(aes(x = delta_T_min, y = temp, color = chamber)) +
+  geom_line(size = 1.5) +
+  scale_color_viridis_d() +
+  facet_wrap(~treatment) +
+  labs(y = expression('Temperature (\u00B0C)'), x = "Elapsed Time (min)", title = "Tahoe City Incubation Temperature") +
+  theme_bw(base_size = 20) +
+  theme(legend.position = "none")
+
+temp_plot
+
+ggsave("plots/210315_tahoecity_enriched/210315_tahoecity_temp_plot.png", plot = temp_plot, width = 10, height = 7)
+
+# plotting DO mass (mg) for each chamber
+DO_mass_plot <- dat_full %>%
+  ggplot(aes(x = delta_T_min, y = oxygen_mass_mg, color = chamber)) +
+  geom_line(size = 1.5) +
+  xlim(70, 285) +
+  scale_color_viridis_d() +
+  facet_wrap(~treatment) +
+  labs(y = expression(Oxygen~Mass~(mg)), x = "Elapsed Time (min)", title = "Tahoe City Incubation DO Mass") +
+  theme_bw(base_size = 20) +
+  theme(legend.position = "none")
+
+  DO_mass_plot
+  
+ggsave("plots/210315_tahoecity_enriched/210315_tahoecity_DO_mass_plot.png", plot = DO_mass_plot, width = 10, height = 7)
+
+# making interactive plot with plotly to help identity data points for rate calculations below
+p<- plotly::ggplotly(DO_mass_plot)
+p
+# exporting interactive plot to html
+htmlwidgets::saveWidget(as_widget(p), "plots/210315_tahoecity_enriched/210315_tc_DO_mass_plot.html")
+
+```
+
+## Metabolic Rate Calculations
+### Tank 1; 10C
+#### Chamber 9
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 99 to minute 170 ##
+tc_e_9 <- dat_full %>%
+  filter(chamber == "Chamber 9" & delta_T_min >= 99 & delta_T_min <= 170)
+
+tc_e_9_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_9)
+summary(tc_e_9_NEP_mod)
+tc_e_9_NEP_mod$coefficients[2]
+tc_e_9_NEP_slope <- unname(tc_e_9_NEP_mod$coefficients[2])
+
+# oxygen mass (mg) = 0.01659 * time(minutes) + 0.2537
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_9_NEP <- tc_e_9_NEP_slope * 1440
+tc_e_9_NEP
+
+######################## ER rate calculations
+
+## linear portion of the ER curve is roughly from minute 225 to the end of the incubation.
+# This is due to a weird oxygen spike caused by temperature measurements associated with DO calculations reflecting water bath temperatures and not temperatures inside chambers, thus DO msmnts were inflated for this brief period.
+# I took slopes of ER curves before and after the erroneous DO spike and averaged the two slopes to get the average ER rate
+tc_e_9 <- dat_full %>%
+  filter(chamber =="Chamber 9" & delta_T_min >= 225)
+
+tc_e_9_ER_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_9)
+summary(tc_e_9_ER_mod)
+tc_e_9_ER_mod$coefficients[2]
+tc_e_9_ER_slope <- unname(tc_e_9_ER_mod$coefficients[2])
+
+# oxygen mass (mg) = -0.01045 * time(minutes) + 30.49
+
+
+## checking slope of other section of ER curve to make sure they're the same before and after the anomalous DO spike
+tc_e_9 <- dat_full %>%
+  filter(chamber =="Chamber 9" & delta_T_min >= 175 & delta_T_min <= 215)
+
+tc_e_9_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, tc_e_9)
+summary(tc_e_9_ER_mod2)
+tc_e_9_ER_mod2$coefficients[2]
+tc_e_9_ER_slope2 <- unname(tc_e_9_ER_mod2$coefficients[2])
+
+# oxygen mass (mg) = -0.00697 * time(minutes) + 29.41
+
+# calculate average of the two ER slopes
+tc_e_9_ER_slope_avg <- (tc_e_9_ER_slope + tc_e_9_ER_slope2)/2
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_9_ER <- tc_e_9_ER_slope_avg * 1440
+tc_e_9_ER
+
+######################## GPP
+tc_e_9_GPP <- tc_e_9_NEP - tc_e_9_ER
+```
+
+#### Chamber 1
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 99 to minute 170 ##
+tc_e_1 <- dat_full %>%
+  filter(chamber == "Chamber 1" & delta_T_min >= 99 & delta_T_min <= 170)
+
+tc_e_1_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_1)
+summary(tc_e_1_NEP_mod)
+tc_e_1_NEP_mod$coefficients[2]
+tc_e_1_NEP_slope <- unname(tc_e_1_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_1_NEP <- tc_e_1_NEP_slope * 1440
+tc_e_1_NEP
+
+######################## ER rate calculations
+
+## linear portion of the ER curve is roughly from minute 225 to the end of the incubation.
+# This is due to a weird oxygen spike caused by temperature measurements associated with DO calculations reflecting water bath temperatures and not temperatures inside chambers, thus DO msmnts were inflated for this brief period.
+# I took slopes of ER curves before and after the erroneous DO spike and averaged the two slopes to get the average ER rate
+tc_e_1 <- dat_full %>%
+  filter(chamber =="Chamber 1" & delta_T_min >= 225)
+
+tc_e_1_ER_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_1)
+summary(tc_e_1_ER_mod)
+tc_e_1_ER_mod$coefficients[2]
+tc_e_1_ER_slope <- unname(tc_e_1_ER_mod$coefficients[2])
+
+
+
+## checking slope of other section of ER curve to make sure they're the same before and after the anomalous DO spike
+tc_e_1 <- dat_full %>%
+  filter(chamber =="Chamber 1" & delta_T_min >= 175 & delta_T_min <= 215)
+
+tc_e_1_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, tc_e_1)
+summary(tc_e_1_ER_mod2)
+tc_e_1_ER_mod2$coefficients[2]
+tc_e_1_ER_slope2 <- unname(tc_e_1_ER_mod2$coefficients[2])
+
+
+# calculate average of the two ER slopes
+tc_e_1_ER_slope_avg <- (tc_e_1_ER_slope + tc_e_1_ER_slope2)/2
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_1_ER <- tc_e_1_ER_slope_avg * 1440
+tc_e_1_ER
+
+################# GPP
+tc_e_1_GPP <- tc_e_1_NEP - tc_e_1_ER
+```
+
+#### Chamber 8
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 99 to minute 170 ##
+tc_e_8 <- dat_full %>%
+  filter(chamber == "Chamber 8" & delta_T_min >= 99 & delta_T_min <= 170)
+
+tc_e_8_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_8)
+summary(tc_e_8_NEP_mod)
+tc_e_8_NEP_mod$coefficients[2]
+tc_e_8_NEP_slope <- unname(tc_e_8_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_8_NEP <- tc_e_8_NEP_slope * 1440
+tc_e_8_NEP
+
+######################## ER rate calculations
+
+## linear portion of the ER curve is roughly from minute 225 to the end of the incubation.
+# This is due to a weird oxygen spike caused by temperature measurements associated with DO calculations reflecting water bath temperatures and not temperatures inside chambers, thus DO msmnts were inflated for this brief period.
+# I took slopes of ER curves before and after the erroneous DO spike and averaged the two slopes to get the average ER rate
+tc_e_8 <- dat_full %>%
+  filter(chamber =="Chamber 8" & delta_T_min >= 225)
+
+tc_e_8_ER_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_8)
+summary(tc_e_8_ER_mod)
+tc_e_8_ER_mod$coefficients[2]
+tc_e_8_ER_slope <- unname(tc_e_8_ER_mod$coefficients[2])
+
+
+
+## checking slope of other section of ER curve to make sure they're the same before and after the anomalous DO spike
+tc_e_8 <- dat_full %>%
+  filter(chamber =="Chamber 8" & delta_T_min >= 175 & delta_T_min <= 215)
+
+tc_e_8_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, tc_e_8)
+summary(tc_e_8_ER_mod2)
+tc_e_8_ER_mod2$coefficients[2]
+tc_e_8_ER_slope2 <- unname(tc_e_8_ER_mod2$coefficients[2])
+
+
+# calculate average of the two ER slopes
+tc_e_8_ER_slope_avg <- (tc_e_8_ER_slope + tc_e_8_ER_slope2)/2
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_8_ER <- tc_e_8_ER_slope_avg * 1440
+tc_e_8_ER
+
+################# GPP
+tc_e_8_GPP <- tc_e_8_NEP - tc_e_8_ER
+```
+
+#### Chamber 12
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 99 to minute 170 ##
+tc_e_12 <- dat_full %>%
+  filter(chamber == "Chamber 12" & delta_T_min >= 99 & delta_T_min <= 170)
+
+tc_e_12_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_12)
+summary(tc_e_12_NEP_mod)
+tc_e_12_NEP_mod$coefficients[2]
+tc_e_12_NEP_slope <- unname(tc_e_12_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_12_NEP <- tc_e_12_NEP_slope * 1440
+tc_e_12_NEP
+
+######################## ER rate calculations
+
+## linear portion of the ER curve is roughly from minute 225 to the end of the incubation.
+# This is due to a weird oxygen spike caused by temperature measurements associated with DO calculations reflecting water bath temperatures and not temperatures inside chambers, thus DO msmnts were inflated for this brief period.
+# I took slopes of ER curves before and after the erroneous DO spike and averaged the two slopes to get the average ER rate
+tc_e_12 <- dat_full %>%
+  filter(chamber =="Chamber 12" & delta_T_min >= 225)
+
+tc_e_12_ER_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_12)
+summary(tc_e_12_ER_mod)
+tc_e_12_ER_mod$coefficients[2]
+tc_e_12_ER_slope <- unname(tc_e_12_ER_mod$coefficients[2])
+
+
+
+## checking slope of other section of ER curve to make sure they're the same before and after the anomalous DO spike
+tc_e_12 <- dat_full %>%
+  filter(chamber =="Chamber 12" & delta_T_min >= 175 & delta_T_min <= 215)
+
+tc_e_12_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, tc_e_12)
+summary(tc_e_12_ER_mod2)
+tc_e_12_ER_mod2$coefficients[2]
+tc_e_12_ER_slope2 <- unname(tc_e_12_ER_mod2$coefficients[2])
+
+
+# calculate average of the two ER slopes
+tc_e_12_ER_slope_avg <- (tc_e_12_ER_slope + tc_e_12_ER_slope2)/2
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_12_ER <- tc_e_12_ER_slope_avg * 1440
+tc_e_12_ER
+
+################# GPP
+tc_e_12_GPP <- tc_e_12_NEP - tc_e_12_ER
+```
+
+### Tank 2; 7C
+#### Chamber 15
+##### Did not stir correctly, thus rates are not included in the analysis
+
+#### Chamber 7
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 99 to minute 170 ##
+tc_e_7 <- dat_full %>%
+  filter(chamber == "Chamber 7" & delta_T_min >= 99 & delta_T_min <= 170)
+
+tc_e_7_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_7)
+summary(tc_e_7_NEP_mod)
+tc_e_7_NEP_mod$coefficients[2]
+tc_e_7_NEP_slope <- unname(tc_e_7_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_7_NEP <- tc_e_7_NEP_slope * 1440
+tc_e_7_NEP
+
+######################## ER rate calculations
+
+## linear portion of the ER curve is roughly from minute 190 to minute 245
+# This is due to a weird oxygen spike caused by temperature measurements associated with DO calculations reflecting water bath temperatures and not temperatures inside chambers, thus DO msmnts were inflated for this brief period.
+# I took slopes of ER curves before and after the erroneous DO spike and averaged the two slopes to get the average ER rate
+tc_e_7 <- dat_full %>%
+  filter(chamber =="Chamber 7" & delta_T_min >= 190 & delta_T_min <= 245)
+
+tc_e_7_ER_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_7)
+summary(tc_e_7_ER_mod)
+tc_e_7_ER_mod$coefficients[2]
+tc_e_7_ER_slope <- unname(tc_e_7_ER_mod$coefficients[2])
+
+
+
+## checking slope of other section of ER curve to make sure they're the same before and after the anomalous DO spike
+tc_e_7 <- dat_full %>%
+  filter(chamber =="Chamber 7" & delta_T_min >= 260)
+
+tc_e_7_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, tc_e_7)
+summary(tc_e_7_ER_mod2)
+tc_e_7_ER_mod2$coefficients[2]
+tc_e_7_ER_slope2 <- unname(tc_e_7_ER_mod2$coefficients[2])
+
+
+# calculate average of the two ER slopes
+tc_e_7_ER_slope_avg <- (tc_e_7_ER_slope + tc_e_7_ER_slope2)/2
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_7_ER <- tc_e_7_ER_slope_avg * 1440
+tc_e_7_ER
+
+################# GPP
+tc_e_7_GPP <- tc_e_7_NEP - tc_e_7_ER
+```
+##### has low R^2 for second half of ER rate
+
+#### Chamber 6
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 99 to minute 170 ##
+tc_e_6 <- dat_full %>%
+  filter(chamber == "Chamber 6" & delta_T_min >= 99 & delta_T_min <= 170)
+
+tc_e_6_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_6)
+summary(tc_e_6_NEP_mod)
+tc_e_6_NEP_mod$coefficients[2]
+tc_e_6_NEP_slope <- unname(tc_e_6_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_6_NEP <- tc_e_6_NEP_slope * 1440
+tc_e_6_NEP
+
+######################## ER rate calculations
+
+## linear portion of the ER curve is roughly from minute 190 to minute 245
+# This is due to a weird oxygen spike caused by temperature measurements associated with DO calculations reflecting water bath temperatures and not temperatures inside chambers, thus DO msmnts were inflated for this brief period.
+# I took slopes of ER curves before and after the erroneous DO spike and averaged the two slopes to get the average ER rate
+tc_e_6 <- dat_full %>%
+  filter(chamber =="Chamber 6" & delta_T_min >= 190 & delta_T_min <= 245)
+
+tc_e_6_ER_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_6)
+summary(tc_e_6_ER_mod)
+tc_e_6_ER_mod$coefficients[2]
+tc_e_6_ER_slope <- unname(tc_e_6_ER_mod$coefficients[2])
+
+
+
+## checking slope of other section of ER curve to make sure they're the same before and after the anomalous DO spike
+tc_e_6 <- dat_full %>%
+  filter(chamber =="Chamber 6" & delta_T_min >= 260)
+
+tc_e_6_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, tc_e_6)
+summary(tc_e_6_ER_mod2)
+tc_e_6_ER_mod2$coefficients[2]
+tc_e_6_ER_slope2 <- unname(tc_e_6_ER_mod2$coefficients[2])
+
+
+# calculate average of the two ER slopes
+tc_e_6_ER_slope_avg <- (tc_e_6_ER_slope + tc_e_6_ER_slope2)/2
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_6_ER <- tc_e_6_ER_slope_avg * 1440
+tc_e_6_ER
+
+################# GPP
+tc_e_6_GPP <- tc_e_6_NEP - tc_e_6_ER
+```
+
+#### Chamber 5
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 99 to minute 170 ##
+tc_e_5 <- dat_full %>%
+  filter(chamber == "Chamber 5" & delta_T_min >= 99 & delta_T_min <= 170)
+
+tc_e_5_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_5)
+summary(tc_e_5_NEP_mod)
+tc_e_5_NEP_mod$coefficients[2]
+tc_e_5_NEP_slope <- unname(tc_e_5_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_5_NEP <- tc_e_5_NEP_slope * 1440
+tc_e_5_NEP
+
+######################## ER rate calculations
+
+## linear portion of the ER curve is roughly from minute 190 to minute 245
+# This is due to a weird oxygen spike caused by temperature measurements associated with DO calculations reflecting water bath temperatures and not temperatures inside chambers, thus DO msmnts were inflated for this brief period.
+# I took slopes of ER curves before and after the erroneous DO spike and averaged the two slopes to get the average ER rate
+tc_e_5 <- dat_full %>%
+  filter(chamber =="Chamber 5" & delta_T_min >= 190 & delta_T_min <= 245)
+
+tc_e_5_ER_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_5)
+summary(tc_e_5_ER_mod)
+tc_e_5_ER_mod$coefficients[2]
+tc_e_5_ER_slope <- unname(tc_e_5_ER_mod$coefficients[2])
+
+
+
+## checking slope of other section of ER curve to make sure they're the same before and after the anomalous DO spike
+tc_e_5 <- dat_full %>%
+  filter(chamber =="Chamber 5" & delta_T_min >= 260)
+
+tc_e_5_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, tc_e_5)
+summary(tc_e_5_ER_mod2)
+tc_e_5_ER_mod2$coefficients[2]
+tc_e_5_ER_slope2 <- unname(tc_e_5_ER_mod2$coefficients[2])
+
+
+# calculate average of the two ER slopes
+tc_e_5_ER_slope_avg <- (tc_e_5_ER_slope + tc_e_5_ER_slope2)/2
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_5_ER <- tc_e_5_ER_slope_avg * 1440
+tc_e_5_ER
+
+################# GPP
+tc_e_5_GPP <- tc_e_5_NEP - tc_e_5_ER
+```
+###### has low R^2 for second half of the ER rate
+
+
+### Tank 3; 13C
+#### Chamber 3
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 99 to minute 170 ##
+tc_e_3 <- dat_full %>%
+  filter(chamber == "Chamber 3" & delta_T_min >= 99 & delta_T_min <= 170)
+
+tc_e_3_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_3)
+summary(tc_e_3_NEP_mod)
+tc_e_3_NEP_mod$coefficients[2]
+tc_e_3_NEP_slope <- unname(tc_e_3_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_3_NEP <- tc_e_3_NEP_slope * 1440
+tc_e_3_NEP
+
+######################## ER rate calculations
+
+## linear portion of the ER curve is roughly from minute 175 to minute 275
+# This is due to a weird oxygen spike caused by temperature measurements associated with DO calculations reflecting water bath temperatures and not temperatures inside chambers, thus DO msmnts were inflated for this brief period.
+# I took slopes of ER curves before and after the erroneous DO spike and averaged the two slopes to get the average ER rate
+tc_e_3 <- dat_full %>%
+  filter(chamber =="Chamber 3" & delta_T_min >= 175 & delta_T_min <= 275)
+
+tc_e_3_ER_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_3)
+summary(tc_e_3_ER_mod)
+tc_e_3_ER_mod$coefficients[2]
+tc_e_3_ER_slope <- unname(tc_e_3_ER_mod$coefficients[2])
+
+
+
+## In this tank there is no need to check slope of other section of ER curve since DO spike does not interrupt ER part of incubation until the very end.
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_3_ER <- tc_e_3_ER_slope * 1440
+tc_e_3_ER
+
+################# GPP
+tc_e_3_GPP <- tc_e_3_NEP - tc_e_3_ER
+```
+
+#### Chamber 2
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 99 to minute 170 ##
+tc_e_2 <- dat_full %>%
+  filter(chamber == "Chamber 2" & delta_T_min >= 99 & delta_T_min <= 170)
+
+tc_e_2_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_2)
+summary(tc_e_2_NEP_mod)
+tc_e_2_NEP_mod$coefficients[2]
+tc_e_2_NEP_slope <- unname(tc_e_2_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_2_NEP <- tc_e_2_NEP_slope * 1440
+tc_e_2_NEP
+
+######################## ER rate calculations
+
+## linear portion of the ER curve is roughly from minute 175 to minute 275
+# This is due to a weird oxygen spike caused by temperature measurements associated with DO calculations reflecting water bath temperatures and not temperatures inside chambers, thus DO msmnts were inflated for this brief period.
+# I took slopes of ER curves before and after the erroneous DO spike and averaged the two slopes to get the average ER rate
+tc_e_2 <- dat_full %>%
+  filter(chamber =="Chamber 2" & delta_T_min >= 175 & delta_T_min <= 275)
+
+tc_e_2_ER_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_2)
+summary(tc_e_2_ER_mod)
+tc_e_2_ER_mod$coefficients[2]
+tc_e_2_ER_slope <- unname(tc_e_2_ER_mod$coefficients[2])
+
+
+
+## In this tank there is no need to check slope of other section of ER curve since DO spike does not interrupt ER part of incubation until the very end.
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_2_ER <- tc_e_2_ER_slope * 1440
+tc_e_2_ER
+
+################# GPP
+tc_e_2_GPP <- tc_e_2_NEP - tc_e_2_ER
+```
+
+#### Chamber 4
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 99 to minute 170 ##
+tc_e_4 <- dat_full %>%
+  filter(chamber == "Chamber 4" & delta_T_min >= 99 & delta_T_min <= 170)
+
+tc_e_4_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_4)
+summary(tc_e_4_NEP_mod)
+tc_e_4_NEP_mod$coefficients[2]
+tc_e_4_NEP_slope <- unname(tc_e_4_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_4_NEP <- tc_e_4_NEP_slope * 1440
+tc_e_4_NEP
+
+######################## ER rate calculations
+
+## linear portion of the ER curve is roughly from minute 175 to minute 275
+# This is due to a weird oxygen spike caused by temperature measurements associated with DO calculations reflecting water bath temperatures and not temperatures inside chambers, thus DO msmnts were inflated for this brief period.
+# I took slopes of ER curves before and after the erroneous DO spike and averaged the two slopes to get the average ER rate
+tc_e_4 <- dat_full %>%
+  filter(chamber =="Chamber 4" & delta_T_min >= 175 & delta_T_min <= 275)
+
+tc_e_4_ER_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_4)
+summary(tc_e_4_ER_mod)
+tc_e_4_ER_mod$coefficients[2]
+tc_e_4_ER_slope <- unname(tc_e_4_ER_mod$coefficients[2])
+
+
+
+## In this tank there is no need to check slope of other section of ER curve since DO spike does not interrupt ER part of incubation until the very end.
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_4_ER <- tc_e_4_ER_slope * 1440
+tc_e_4_ER
+
+################# GPP
+tc_e_4_GPP <- tc_e_4_NEP - tc_e_4_ER
+```
+
+#### Chamber 10
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 99 to minute 170 ##
+tc_e_10 <- dat_full %>%
+  filter(chamber == "Chamber 10" & delta_T_min >= 99 & delta_T_min <= 170)
+
+tc_e_10_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_10)
+summary(tc_e_10_NEP_mod)
+tc_e_10_NEP_mod$coefficients[2]
+tc_e_10_NEP_slope <- unname(tc_e_10_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_10_NEP <- tc_e_10_NEP_slope * 1440
+tc_e_10_NEP
+
+######################## ER rate calculations
+
+## linear portion of the ER curve is roughly from minute 175 to minute 275
+# This is due to a weird oxygen spike caused by temperature measurements associated with DO calculations reflecting water bath temperatures and not temperatures inside chambers, thus DO msmnts were inflated for this brief period.
+# I took slopes of ER curves before and after the erroneous DO spike and averaged the two slopes to get the average ER rate
+tc_e_10 <- dat_full %>%
+  filter(chamber =="Chamber 10" & delta_T_min >= 175 & delta_T_min <= 275)
+
+tc_e_10_ER_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_10)
+summary(tc_e_10_ER_mod)
+tc_e_10_ER_mod$coefficients[2]
+tc_e_10_ER_slope <- unname(tc_e_10_ER_mod$coefficients[2])
+
+
+
+## In this tank there is no need to check slope of other section of ER curve since DO spike does not interrupt ER part of incubation until the very end.
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_10_ER <- tc_e_10_ER_slope * 1440
+tc_e_10_ER
+
+################# GPP
+tc_e_10_GPP <- tc_e_10_NEP - tc_e_10_ER
+```
+
+### Tank 4; 16C
+#### Chamber 16
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 99 to minute 170 ##
+tc_e_16 <- dat_full %>%
+  filter(chamber == "Chamber 16" & delta_T_min >= 99 & delta_T_min <= 170)
+
+tc_e_16_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_16)
+summary(tc_e_16_NEP_mod)
+tc_e_16_NEP_mod$coefficients[2]
+tc_e_16_NEP_slope <- unname(tc_e_16_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_16_NEP <- tc_e_16_NEP_slope * 1440
+tc_e_16_NEP
+
+######################## ER rate calculations
+
+## linear portion of the ER curve is roughly from minute 172 to the end of the incubaton
+
+## In this tank there is no erroneous DO spike since temperature probe was placed inside of a chamber through a hole drilled through the lid, thus temperature used to calculate DO concentration was more accurate.
+
+tc_e_16 <- dat_full %>%
+  filter(chamber =="Chamber 16" & delta_T_min >= 172)
+
+tc_e_16_ER_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_16)
+summary(tc_e_16_ER_mod)
+tc_e_16_ER_mod$coefficients[2]
+tc_e_16_ER_slope <- unname(tc_e_16_ER_mod$coefficients[2])
+
+
+
+## In this tank there is no need to check slope of other section of ER curve since DO spike does not interrupt ER part of incubation until the very end.
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_16_ER <- tc_e_16_ER_slope * 1440
+tc_e_16_ER
+
+################# GPP
+tc_e_16_GPP <- tc_e_16_NEP - tc_e_16_ER
+```
+
+#### Chamber 11
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 99 to minute 170 ##
+tc_e_11 <- dat_full %>%
+  filter(chamber == "Chamber 11" & delta_T_min >= 99 & delta_T_min <= 170)
+
+tc_e_11_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_11)
+summary(tc_e_11_NEP_mod)
+tc_e_11_NEP_mod$coefficients[2]
+tc_e_11_NEP_slope <- unname(tc_e_11_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_11_NEP <- tc_e_11_NEP_slope * 1440
+tc_e_11_NEP
+
+######################## ER rate calculations
+
+## linear portion of the ER curve is roughly from minute 172 to the end of the incubaton
+
+## In this tank there is no erroneous DO spike since temperature probe was placed inside of a chamber through a hole drilled through the lid, thus temperature used to calculate DO concentration was more accurate.
+
+tc_e_11 <- dat_full %>%
+  filter(chamber =="Chamber 11" & delta_T_min >= 172)
+
+tc_e_11_ER_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_11)
+summary(tc_e_11_ER_mod)
+tc_e_11_ER_mod$coefficients[2]
+tc_e_11_ER_slope <- unname(tc_e_11_ER_mod$coefficients[2])
+
+
+
+## In this tank there is no need to check slope of other section of ER curve since DO spike does not interrupt ER part of incubation until the very end.
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_11_ER <- tc_e_11_ER_slope * 1440
+tc_e_11_ER
+
+################# GPP
+tc_e_11_GPP <- tc_e_11_NEP - tc_e_11_ER
+```
+
+#### Chamber 13
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 99 to minute 170 ##
+tc_e_13 <- dat_full %>%
+  filter(chamber == "Chamber 13" & delta_T_min >= 99 & delta_T_min <= 170)
+
+tc_e_13_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_13)
+summary(tc_e_13_NEP_mod)
+tc_e_13_NEP_mod$coefficients[2]
+tc_e_13_NEP_slope <- unname(tc_e_13_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_13_NEP <- tc_e_13_NEP_slope * 1440
+tc_e_13_NEP
+
+######################## ER rate calculations
+
+## linear portion of the ER curve is roughly from minute 172 to the end of the incubaton
+
+## In this tank there is no erroneous DO spike since temperature probe was placed inside of a chamber through a hole drilled through the lid, thus temperature used to calculate DO concentration was more accurate.
+
+tc_e_13 <- dat_full %>%
+  filter(chamber =="Chamber 13" & delta_T_min >= 172)
+
+tc_e_13_ER_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_13)
+summary(tc_e_13_ER_mod)
+tc_e_13_ER_mod$coefficients[2]
+tc_e_13_ER_slope <- unname(tc_e_13_ER_mod$coefficients[2])
+
+
+
+## In this tank there is no need to check slope of other section of ER curve since DO spike does not interrupt ER part of incubation until the very end.
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_13_ER <- tc_e_13_ER_slope * 1440
+tc_e_13_ER
+
+################# GPP
+tc_e_13_GPP <- tc_e_13_NEP - tc_e_13_ER
+```
+
+#### Chamber 14
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 99 to minute 170 ##
+tc_e_14 <- dat_full %>%
+  filter(chamber == "Chamber 14" & delta_T_min >= 99 & delta_T_min <= 170)
+
+tc_e_14_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_14)
+summary(tc_e_14_NEP_mod)
+tc_e_14_NEP_mod$coefficients[2]
+tc_e_14_NEP_slope <- unname(tc_e_14_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_14_NEP <- tc_e_14_NEP_slope * 1440
+tc_e_14_NEP
+
+######################## ER rate calculations
+
+## linear portion of the ER curve is roughly from minute 172 to the end of the incubaton
+
+## In this tank there is no erroneous DO spike since temperature probe was placed inside of a chamber through a hole drilled through the lid, thus temperature used to calculate DO concentration was more accurate.
+
+tc_e_14 <- dat_full %>%
+  filter(chamber =="Chamber 14" & delta_T_min >= 172)
+
+tc_e_14_ER_mod <- lm(oxygen_mass_mg~delta_T_min, tc_e_14)
+summary(tc_e_14_ER_mod)
+tc_e_14_ER_mod$coefficients[2]
+tc_e_14_ER_slope <- unname(tc_e_14_ER_mod$coefficients[2])
+
+
+
+## In this tank there is no need to check slope of other section of ER curve since DO spike does not interrupt ER part of incubation until the very end.
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+tc_e_14_ER <- tc_e_14_ER_slope * 1440
+tc_e_14_ER
+
+################# GPP
+tc_e_14_GPP <- tc_e_14_NEP - tc_e_14_ER
+```
+
+
+## Creating dataframe with metab rates
+```{r}
+# creating dataframe of metab rates to make barplot
+## excluding chamber 15 since it had anomalous values due to a faulty stirrer
+tc_e_rates <- data.frame(
+  "NEP_mg_d" = c(tc_e_1_NEP, tc_e_2_NEP, tc_e_3_NEP, tc_e_4_NEP, tc_e_5_NEP, tc_e_6_NEP, tc_e_7_NEP, tc_e_8_NEP, tc_e_9_NEP, tc_e_10_NEP, tc_e_11_NEP, tc_e_12_NEP, tc_e_13_NEP, tc_e_14_NEP, "NA", tc_e_16_NEP),
+  "ER_mg_d" = c(tc_e_1_ER, tc_e_2_ER, tc_e_3_ER, tc_e_4_ER, tc_e_5_ER, tc_e_6_ER, tc_e_7_ER, tc_e_8_ER, tc_e_9_ER, tc_e_10_ER, tc_e_11_ER, tc_e_12_ER, tc_e_13_ER, tc_e_14_ER, "NA",  tc_e_16_ER),
+  "chamber" = c("Chamber 1", "Chamber 2", "Chamber 3", "Chamber 4", "Chamber 5", "Chamber 6", "Chamber 7", "Chamber 8", "Chamber 9", "Chamber 10", "Chamber 11", "Chamber 12", "Chamber 13", "Chamber 14", "Chamber 15", "Chamber 16"))
+head(tc_e_rates)
+#str(tc_e_rates)
+
+# formatting data types of columns
+tc_e_rates$NEP_mg_d <- as.numeric(tc_e_rates$NEP_mg_d)
+tc_e_rates$ER_mg_d <- as.numeric(tc_e_rates$ER_mg_d)
+
+# calculating GPP from NEP and ER columns
+tc_e_rates <- tc_e_rates %>%
+  mutate(GPP_mg_d = NEP_mg_d - ER_mg_d)
+head(tc_e_rates)
+```
+
+## Joining metab rates dataframe with chamber dataframe
+```{r}
+dat_final <- full_join(dat_chambers, tc_e_rates, by = "chamber")
+#View(dat_final)
+
+# adding temperature treatment (discrete factor) and temp_C (continuous numeric) columns based off of tank column already in data
+dat_final <- dat_final %>%
+  mutate(treatment = ifelse(tank == "1", "10C", ifelse(tank == "2", "7C", ifelse(tank == "3", "13C", "16C")))) %>%
+  mutate(temp_C = ifelse(tank == "1", "10", ifelse(tank == "2", "7", ifelse(tank == "3", "13", "16"))))
+
+# making temp_C column numberic and not a factor
+dat_final$temp_C <- as.numeric(dat_final$temp_C)
+```
+
+# Normalizing metabolic rates to biomass and surface area
+```{r}
+# normalizing metabolic rates by AFDW and by rock surface area
+dat_final <- dat_final %>%
+  mutate(GPP_mgO2_d_gAFDW = GPP_mg_d/total_AFDW_g, NEP_mgO2_d_gAFDW = NEP_mg_d/total_AFDW_g, ER_mgO2_d_gAFDW = ER_mg_d/total_AFDW_g) %>%
+  mutate(GPP_mgO2_d_m2 = GPP_mg_d/rock_SA_m2, NEP_mgO2_d_m2 = NEP_mg_d/rock_SA_m2, ER_mgO2_d_m2 = ER_mg_d/rock_SA_m2)
+
+#View(dat_final)
+
+# subsetting only the columns I need
+metab_subset <- dat_final %>%
+  select(chamber, treatment, GPP_mgO2_d_gAFDW, NEP_mgO2_d_gAFDW, ER_mgO2_d_gAFDW)
+#View(metab_subset)
+
+# averaging and taking std of metabolic rates by temperature treatment (I multiplied ER by -1 to make it positive)
+metab_avg <- metab_subset %>%
+  filter(!is.na(ER_mgO2_d_gAFDW)) %>%
+  group_by(treatment) %>%
+  summarise(avg_GPP = mean(GPP_mgO2_d_gAFDW), sd_GPP = sd(GPP_mgO2_d_gAFDW), avg_NEP = mean(NEP_mgO2_d_gAFDW), sd_NEP = sd(NEP_mgO2_d_gAFDW), avg_ER = -1 * mean(ER_mgO2_d_gAFDW), sd_ER = sd(ER_mgO2_d_gAFDW))
+#View(metab_avg)
+
+
+# melting data from wide to long format in order to graph multiple y-variables at once
+melt_metab <- melt(metab_avg, id.vars = c("treatment", "sd_GPP", "sd_NEP", "sd_ER"), variable.name = "rate_variable", value.name = "metabolic_rate_mgO2_d_gAFDW")
+#View(melt_metab)
+
+
+# making treatment a factor variable and re-ordering it for plots
+melt_metab$treatment <- factor(melt_metab$treatment, levels = c("7C", "10C", "13C", "16C"))
+
+# plotting various rates normalized to AFDW for each temperature treatment
+rate_plot <- melt_metab %>%
+  ggplot(aes(treatment, metabolic_rate_mgO2_d_gAFDW, fill = rate_variable)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = metabolic_rate_mgO2_d_gAFDW - ifelse(rate_variable ==  "avg_GPP", sd_GPP, ifelse(rate_variable == "avg_NEP", sd_NEP, sd_ER)), ymax = metabolic_rate_mgO2_d_gAFDW + ifelse(rate_variable ==  "avg_GPP", sd_GPP, ifelse(rate_variable == "avg_NEP", sd_NEP, sd_ER))), width = 0.9, position = "dodge") +
+  geom_text(aes(label = round(metabolic_rate_mgO2_d_gAFDW, 1), y = metabolic_rate_mgO2_d_gAFDW + 15, x = treatment), size = 7, position = position_dodge(width = 1.05)) +
+  labs(y = expression(Metabolic~Rate~(mgO[2]~day^{-1}~gAFDW^{-1})), x = "Temperature Treatment", title = "Tahoe City Enriched Incubation") +
+  scale_fill_viridis_d(name = "Rate Variable", labels = c("GPP", "NEP", "ER")) +
+  scale_y_continuous(expand = c(0,0), limits = c(0,365)) +
+  theme_classic(base_size = 20)
+
+rate_plot
+
+ggsave("plots/210315_tahoecity_enriched/210315_tahoecity_AFDW_rate_plot.png", plot = rate_plot, width = 15, height = 7)
+
+```
+
+# plotting non-normalized metabolic rates to check source of variance
+```{r}
+subset2 <- dat_final %>%
+  select(chamber, treatment, GPP_mg_d, NEP_mg_d, ER_mg_d)
+#View(subset2)
+
+# averaging and taking std of metabolic rates by temperature treatment (I multiplied ER by -1 to make it positive)
+metab_avg2 <- subset2 %>%
+  filter(!is.na(ER_mg_d)) %>%
+  group_by(treatment) %>%
+  summarise(avg_GPP = mean(GPP_mg_d), sd_GPP = sd(GPP_mg_d), avg_NEP = mean(NEP_mg_d), sd_NEP = sd(NEP_mg_d), avg_ER = -1 * mean(ER_mg_d), sd_ER = sd(ER_mg_d))
+#View(metab_avg2)
+
+
+# melting data from wide to long format in order to graph multiple y-variables at once
+melt_metab2 <- melt(metab_avg2, id.vars = c("treatment", "sd_GPP", "sd_NEP", "sd_ER"), variable.name = "rate_variable", value.name = "metabolic_rate_mgO2_d")
+#View(melt_metab2)
+
+
+# making treatment a factor variable and re-ordering it for plots
+melt_metab2$treatment <- factor(melt_metab2$treatment, levels = c("7C", "10C", "13C", "16C"))
+
+# plotting non-normalized metabolic rates for each temperature treatment
+rate_plot2 <- melt_metab2 %>%
+  ggplot(aes(treatment, metabolic_rate_mgO2_d, fill = rate_variable)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = metabolic_rate_mgO2_d - ifelse(rate_variable ==  "avg_GPP", sd_GPP, ifelse(rate_variable == "avg_NEP", sd_NEP, sd_ER)), ymax = metabolic_rate_mgO2_d + ifelse(rate_variable ==  "avg_GPP", sd_GPP, ifelse(rate_variable == "avg_NEP", sd_NEP, sd_ER))), width = 0.9, position = "dodge") +
+  geom_text(aes(label = round(metabolic_rate_mgO2_d, 1), y = metabolic_rate_mgO2_d + 3, x = treatment), size = 7, position = position_dodge(width = 1.05)) +
+  labs(y = expression(Metabolic~Rate~(mgO[2]~day^{-1})), x = "Temperature Treatment", title = "Tahoe City Enriched Incubation") +
+  scale_fill_viridis_d(name = "Rate Variable", labels = c("GPP", "NEP", "ER")) +
+  scale_y_continuous(expand = c(0,0), limits = c(0,100)) +
+  theme_bw(base_size = 20)
+
+rate_plot2
+
+ggsave("plots/210315_tahoecity_enriched/210315_tahoecity_non_norm_rate_plot.png", plot = rate_plot2, width = 15, height = 7)
+```
+
+# plotting metabolic rates normalized to surface area
+```{r}
+
+# subsetting only the columns I need
+SA_metab_subset <- dat_final %>%
+  select(chamber, treatment, GPP_mgO2_d_m2, NEP_mgO2_d_m2, ER_mgO2_d_m2)
+#View(SA_metab_subset)
+
+# averaging and taking std of metabolic rates by temperature treatment (I multiplied ER by -1 to make it positive)
+SA_metab_avg <- SA_metab_subset %>%
+  filter(!is.na(ER_mgO2_d_m2)) %>%
+  group_by(treatment) %>%
+  summarise(avg_GPP = mean(GPP_mgO2_d_m2), sd_GPP = sd(GPP_mgO2_d_m2), avg_NEP = mean(NEP_mgO2_d_m2), sd_NEP = sd(NEP_mgO2_d_m2), avg_ER = -1 * mean(ER_mgO2_d_m2), sd_ER = sd(ER_mgO2_d_m2))
+#View(SA_metab_avg)
+
+
+# melting data from wide to long format in order to graph multiple y-variables at once
+SA_melt_metab <- melt(SA_metab_avg, id.vars = c("treatment", "sd_GPP", "sd_NEP", "sd_ER"), variable.name = "rate_variable", value.name = "metabolic_rate_mgO2_d_m2")
+#View(SA_melt_metab)
+
+
+# making treatment a factor variable and re-ordering it for plots
+SA_melt_metab$treatment <- factor(SA_melt_metab$treatment, levels = c("7C", "10C", "13C", "16C"))
+
+# plotting various rates normalized to AFDW for each temperature treatment
+SA_rate_plot <- SA_melt_metab %>%
+  ggplot(aes(treatment, metabolic_rate_mgO2_d_m2, fill = rate_variable)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = metabolic_rate_mgO2_d_m2 - ifelse(rate_variable ==  "avg_GPP", sd_GPP, ifelse(rate_variable == "avg_NEP", sd_NEP, sd_ER)), ymax = metabolic_rate_mgO2_d_m2 + ifelse(rate_variable ==  "avg_GPP", sd_GPP, ifelse(rate_variable == "avg_NEP", sd_NEP, sd_ER))), width = 0.9, position = "dodge") +
+  geom_text(aes(label = round(metabolic_rate_mgO2_d_m2, 1), y = metabolic_rate_mgO2_d_m2 + 175, x = treatment), size = 7, position = position_dodge(width = 1.05)) +
+  labs(y = expression(Metabolic~Rate~(mgO[2]~~m^{-2}~day^{-1})), x = "Temperature Treatment", title = "Tahoe City Enriched Incubation-Surface Area Normalized Metabolism") +
+  scale_fill_viridis_d(name = "Rate Variable", labels = c("GPP", "NEP", "ER")) +
+  scale_y_continuous(expand = c(0,0)) +
+  theme_bw(base_size = 20)
+
+SA_rate_plot
+
+ggsave("plots/210315_tahoecity_enriched/210315_tahoecity_SArate_plot.png", plot = SA_rate_plot, width = 15, height = 7)
+```
+
+# ANOVAs on AFDW-normalized metabolic rates
+```{r}
+# taking a look at the data
+#View(dat_final)
+
+# removing character symbols from chamber and treatment columns so that it's only numbers for the ANOVA
+# subsetting only the columns I need for the ANOVA
+
+dat_AOV <- dat_final %>%
+  mutate(chamber_ID = ifelse(chamber == "Chamber 16", "16", ifelse(chamber == "Chamber 13", "13", ifelse(chamber == "Chamber 14", "14", ifelse(chamber == "Chamber 11", "11", ifelse(chamber == "Chamber 9", "9", ifelse(chamber == "Chamber 1", "1", ifelse(chamber == "Chamber 8", "8", ifelse(chamber == "Chamber 12", "12", ifelse(chamber == "Chamber 15", "15", ifelse(chamber == "Chamber 6", "6", ifelse(chamber == "Chamber 7", "7", ifelse(chamber == "Chamber 5", "5", ifelse(chamber == "Chamber 2", "2", ifelse(chamber == "Chamber 3", "3", ifelse(chamber == "Chamber 4", "4", "10"))))))))))) ))))) %>%
+  mutate(treatment_ID = ifelse(treatment == "7C", "1", ifelse(treatment == "10C", "2", ifelse(treatment == "13C", "3", "4")))) %>%
+  filter(!is.na(NEP_mg_d)) %>%
+  select(chamber_ID, treatment_ID, GPP_mgO2_d_gAFDW, NEP_mgO2_d_gAFDW, ER_mgO2_d_gAFDW, GPP_mgO2_d_m2, NEP_mgO2_d_m2, ER_mgO2_d_m2)
+#str(dat_AOV)
+#View(dat_AOV)
+
+# changing class of chamber and treatment columns to factors for ANOVA
+dat_AOV$chamber_ID <- as.factor(dat_AOV$chamber_ID)
+dat_AOV$treatment_ID <- as.factor(dat_AOV$treatment_ID)
+class(dat_AOV$chamber_ID)
+class(dat_AOV$treatment_ID)
+
+summary(dat_AOV)
+
+# Two-way ANOVA analyzing differences in NEP between the various temperature treatments
+aov_AFDW <- aov(NEP_mgO2_d_gAFDW ~ treatment_ID, data = dat_AOV)
+
+summary(aov_AFDW)
+
+par(mfrow=c(2,2))
+plot(aov_AFDW)
+par(mfrow=c(1,1))
+
+# Tukey HSD post-hoc analysis
+tukey_AFDW<-TukeyHSD(aov_AFDW)
+
+tukey_AFDW
+
+# plotting results of Tukey HSD
+plot(tukey_AFDW, las = 1)
+
+# Tukey HSD reports significant difference between groups 1 and 3 (the 7C and the 13C treatments)
+
+# Dunnet post-hoc test
+DunnettTest(x = dat_AOV$NEP_mgO2_d_gAFDW, g = dat_AOV$treatment_ID)
+
+# Dunnet test reports a significant difference between treatments 1 & 3 and also 1 & 4, likely due to the increased statistical power of this test compared to the Tukey HSD
+
+
+# getting dataset with averages ready for following plot by making sure variable names are consistent and adding groupings based on the Dunnet post-hoc test results
+metab_avg_aov <- metab_avg %>%
+  mutate(treatment_ID = ifelse(treatment == "7C", "1", ifelse(treatment == "10C", "2", ifelse(treatment == "13C", "3", "4")))) %>%
+  mutate(group = ifelse(treatment == "13C" | treatment == "16C", "b", "a"))
+#View(metab_avg_aov)
+
+# plotting real data with averages and error bars overlaid
+
+aov_plot <- dat_AOV %>%
+  ggplot(aes(x = treatment_ID, y = NEP_mgO2_d_gAFDW)) +
+  geom_point(cex = 5, pch = 1.0,position = position_jitter(w = 0.1, h = 0)) +
+  geom_point(data = metab_avg_aov, aes(x = treatment_ID, y = avg_NEP), cex = 5) +
+   stat_summary(fun.data = 'mean_se', geom = 'errorbar', width = 0.2) +
+  geom_text(data = metab_avg_aov, aes(label = group, y = avg_NEP + 50, x = treatment_ID), size = 7) +
+  theme_classic2(base_size = 20) +
+  labs(title = "NEP response to Temperature",
+      x = "Temperature (1=7C, 2=10C, 3=13C, 4=16C)",
+      y = expression(NEP~(mgO[2]~~m^{-2}~day^{-1}~gAFDW^{-1})))
+
+aov_plot
+
+ggsave("plots/210315_tahoecity_enriched/NEP_AOV_plot.png", plot = aov_plot, width = 15, height = 7)
+```
+
+# ANOVA on SA-normalized metabolic rates
+```{r}
+aov_SA <- aov(NEP_mgO2_d_m2 ~ treatment_ID, data = dat_AOV)
+
+summary(aov_SA)
+
+par(mfrow=c(2,2))
+plot(aov_SA)
+par(mfrow=c(1,1))
+```
+
+# Regression of GPP (AFDW-normalized) with temperature
+```{r}
+str(dat_final)
+
+GPP_AFDW_mod <- lm(GPP_mgO2_d_gAFDW ~ temp_C, dat_final)
+summary(GPP_AFDW_mod)
+
+dat_final %>%
+  ggplot(aes(x = temp_C, y = GPP_mgO2_d_gAFDW)) +
+  geom_point(shape = 1, size = 2) +
+  geom_smooth(method = "lm") +
+  stat_regline_equation() +
+  theme_classic() +
+  labs(title = "GPP response to Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(GPP~(mgO[2]~day^{-1}~gAFDW^{-1})))
+```
+
+# Regression of GPP (SA-normalized) with temperature
+```{r}
+GPP_SA_mod <- lm(GPP_mgO2_d_m2 ~ temp_C, dat_final)
+summary(GPP_SA_mod)
+
+dat_final %>%
+  ggplot(aes(x = temp_C, y = GPP_mgO2_d_m2)) +
+  geom_point(shape = 1, size = 2) +
+  geom_smooth(method = "lm") +
+  stat_regline_equation() +
+  theme_classic() +
+  labs(title = "GPP response to Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(GPP~(mgO[2]~~m^{-2}~day^{-1})))
+```
+
+# Regression of ER (AFDW-normalized) with temperature
+```{r}
+ER_AFDW_mod <- lm(ER_mgO2_d_gAFDW ~ temp_C, dat_final)
+summary(ER_AFDW_mod)
+
+dat_final %>%
+  ggplot(aes(x = temp_C, y = ER_mgO2_d_gAFDW)) +
+  geom_point(shape = 1, size = 2) +
+  geom_smooth(method = "lm") +
+  stat_regline_equation() +
+  theme_classic() +
+  labs(title = "ER response to Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(ER~(mgO[2]~day^{-1}~gAFDW^{-1})))
+```
+
+# Exporting metabolic rate data for further analysis
+```{r}
+# making identifier column for joining to ambient incubation data for nutrient effect analysis
+dat_final_e <- dat_final %>%
+  mutate(nutrient_trt = "enriched")
+# exporting data for final analysis
+write_csv(dat_final_e, "data/210315_tahoecity_enriched_inc/210315_TC_enriched_rates.csv")
+```
+

@@ -1,0 +1,169 @@
+---
+title: "Sugarpint Incubation 12/01/2020"
+author: "Nick Framsted"
+date: "12/8/2020"
+output: pdf_document
+---
+# Summary:
+This script contains analysis of data generated from a preliminary incubation of rocks collected from sugarpoint state park on 11/29/20 as well as a comparison of PAR data from the field on 07/20/20 and PAR data collected from this lab incubation.
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(ggpubr)
+# changing working directory from /scripts to /tahoe_lab_inc_analysis
+knitr::opts_knit$set(root.dir = '..')
+```
+
+# importing and cleaning up data
+```{r}
+dat <- read_csv("data/201201_sugarpt_lab_inc_R.csv", skip = 1)
+str(dat)
+#View(dat)
+
+# formatting date times column to posixct
+dat$date_time_PST <- dmy_hms(dat$date, tz = "America/Los_Angeles")
+head(dat)
+
+# filtering out rows with error codes, and adding in chamber numbers based on sensor column
+dat_2 <- dat %>%
+  filter(is.na(error)) %>%
+  mutate(chamber = ifelse(sensor == "Batch 3 (PSt3)", "Chamber 1", ifelse(sensor == "Batch 3_1 (PSt3)", "Chamber 2", ifelse(sensor == "Batch 3_2 (PSt3)", "Chamber 3", "Chamber 4"))))
+head(dat_2)
+
+# selecting only columns I need
+dat_subset <- dat_2 %>%
+  select(date, delta_T_min, oxygen, temp, chamber, date_time_PST)
+
+```
+
+# plotting O2 signals
+```{r}
+# plotting only data points with no error code
+dat_subset %>%
+  ggplot(aes(x = delta_T_min, y = oxygen)) +
+  geom_point() +
+  facet_wrap(~chamber)
+
+# plot of all data points (including rows with errors)
+#first need to add chamber column to dat dataframe
+dat_1 <- dat %>%
+  mutate(chamber = ifelse(sensor == "Batch 3 (PSt3)", "Chamber 1", ifelse(sensor == "Batch 3_1 (PSt3)", "Chamber 2", ifelse(sensor == "Batch 3_2 (PSt3)", "Chamber 3", "Chamber 4")))) %>%
+  filter(oxygen < 10.5 & oxygen > 0) #filtering out outlier datapoints
+
+o2_plot <- dat_1 %>%
+  ggplot(aes(x = delta_T_min, y = oxygen, color = error)) +
+  geom_point() +
+  scale_color_viridis_d(na.value = "grey") +
+  facet_wrap(~chamber) +
+  theme_bw(base_size = 20) +
+  theme(legend.position = "right", legend.title = element_text(size = 12), legend.text = element_text(size = 10))
+o2_plot
+
+ggsave("plots/201201_sugarpt_inc/error_plot.png", plot = o2_plot, width = 10, height = 7)
+# lots of crazy data points in the data with errors included
+```
+
+# calculating metabolic rate 
+```{r}
+# adding regression lines
+o2_plot +
+  geom_smooth(method = "lm") +
+  stat_regline_equation()
+
+# adding column in data based on light and dark periods to use for grouping of data points
+head(dat_1)
+dat_1 <- dat_1 %>%
+  mutate(photoperiod = ifelse(date_time_PST >= "2020-12-01 17:08:00", "dark", "light"))
+
+metab_plot <- dat_1 %>%
+  ggplot(aes(x = delta_T_min, y = oxygen, group = photoperiod)) +
+  geom_point(aes(color = photoperiod)) +
+  geom_smooth(method = "lm") +
+  facet_wrap(~chamber) +
+  scale_color_viridis_d()
+metab_plot
+
+# still some spurious values dark photoperiod first started
+# filtering data to remove some points in that transition from light to dark
+dat_1_clean <- dat_1 %>%
+  filter(date_time_PST < "2020-12-01 17:05:00" | date_time_PST > "2020-12-01 17:15:00")
+
+# replotting using cleaned data
+plot_metab_clean <- dat_1_clean %>%
+   ggplot(aes(x = delta_T_min, y = oxygen, group = photoperiod)) +
+  geom_point(aes(color = photoperiod)) +
+  geom_smooth(method = "lm") +
+  facet_wrap(~chamber) +
+  scale_color_viridis_d(name = "Photoperiod", labels = c("Dark", "Light")) +
+  labs(y = expression(Oxygen~Concentration~(mg~L^{-1})), x = "Elapsed Time (min)") +
+  theme_bw(base_size = 15)
+plot_metab_clean
+
+ggsave("plots/201201_sugarpt_inc/metab_clean.png", plot = plot_metab_clean, width = 10, height = 7)
+
+# adding equations to plots
+plot_metab_trendline <- plot_metab_clean +
+  stat_regline_equation(label.x.npc = c(0.5, 0), label.y.npc = c(0.65, 1))
+
+ggsave("plots/201201_sugarpt_inc/metab_trendline.png", plot = plot_metab_trendline, width = 10, height = 7)
+
+```
+
+# plotting field PAR data
+```{r}
+# reading in PAR data from tahoe in-situ incubations
+# field light level data
+PAR_field <- read_csv("data/R_concat_2020_07_20_180000Z.txt", skip = 2)
+head(PAR_field)
+
+# converting time into posixct
+PAR_field$date_time_PST <- as_datetime(PAR_field$Time_sec, tz = "America/Los_Angeles")
+head(PAR_field)
+
+# comparing light levels in the field to replicated levels in the lab to verify if they are simiar
+
+PAR_field %>%
+  ggplot(aes(x = date_time_PST, y = PAR_umol_s_m_2)) +
+  geom_line()
+
+# viewing only pineland data
+PAR_field %>%
+  filter(date_time_PST < "2020-07-20 11:03:00") %>%
+  ggplot(aes(x = date_time_PST, y = PAR_umol_s_m_2)) +
+  geom_line()
+
+# viewing only sugarpine st park data
+PAR_field %>%
+  filter(date_time_PST > "2020-07-20 16:00:00") %>%
+  ggplot(aes(x = date_time_PST, y = PAR_umol_s_m_2)) +
+  geom_line()
+
+```
+
+According to the field PAR data, light levels at pineland ~11AM were ~1800umol m^-2 s^-1, and at sugarpine state park around ~4:20PM they ranged from 600-800. 
+
+Average light levels in Stan Loeb's thesis on periphyton range 1457 umol m^-2 s^-1, this was a rough back-of-the-envelope conversion from W m^-2 to umol m^-2 s^-1.
+
+# plotting lab PAR data
+```{r}
+# reading in lab PAR data
+PAR_lab <- read_csv("data/R_2020-12-02_PARdat.txt", skip = 2)
+
+# converting date times to posixct
+PAR_lab$date_time_PST <- as_datetime(PAR_lab$Time_sec, tz = "America/Los_Angeles")
+head(PAR_lab)
+
+# plotting lab data
+PAR_lab %>%
+  ggplot(aes(x = date_time_PST, y = PAR_umol_s_m_2)) +
+  geom_line()
+
+# filtering out unnecessary data
+PAR_lab %>%
+  filter(date_time_PST < "2020-12-01 17:07:00") %>%
+  ggplot(aes(x = date_time_PST, y = PAR_umol_s_m_2)) +
+  geom_line()
+```
+

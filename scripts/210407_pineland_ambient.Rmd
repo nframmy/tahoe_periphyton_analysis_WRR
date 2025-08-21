@@ -1,0 +1,1335 @@
+---
+title: "210407 Pineland Ambient"
+author: "Nick Framsted"
+date: "5/7/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(ggpubr)
+library(plotly)
+library(reshape2)
+library(DescTools)
+
+# changing working directory from /scripts to /tahoe_lab_inc_analysis
+knitr::opts_knit$set(root.dir = '..')
+```
+
+# Importing and Processing data
+```{r, include = FALSE}
+# importing and cleaning up DO data
+dat <- read_csv("data/210407_pineland_ambient/210407_pineland_ambient_DO_R.csv", skip = 1)
+#str(dat)
+#View(dat)
+
+
+# filtering out rows with error codes, and adding in chamber numbers based the tank and channel number cross referenced against incubation notes
+## double checked for correctness on 7/6/21 NTF
+
+dat_2 <- dat %>%
+  filter(Error == 0) %>%
+  mutate(
+    chamber = case_when(
+    tank_channel == "Tank 1_1"  ~ "6",
+    tank_channel == "Tank 1_2"  ~ "9",
+    tank_channel == "Tank 1_3" ~ "2",
+    tank_channel == "Tank 1_4" ~ "11",
+    tank_channel == "Tank 2_1" ~ "13",
+    tank_channel == "Tank 2_2" ~ "15",
+    tank_channel == "Tank 2_3" ~ "4",
+    tank_channel == "Tank 2_4" ~ "16",
+    tank_channel == "Tank 3_1" ~ "12",
+    tank_channel == "Tank 3_2" ~ "14",
+    tank_channel == "Tank 3_3" ~ "8",
+    tank_channel == "Tank 3_4" ~ "1",
+    tank_channel == "Tank 4_1" ~ "3",
+    tank_channel == "Tank 4_2" ~ "7",
+    tank_channel == "Tank 4_3" ~ "10",
+    tank_channel == "Tank 4_4" ~ "5",
+  )) %>%
+   mutate(treatment = ifelse(Device_Serial == "Tank 2", "7C", ifelse(Device_Serial == "Tank 1", "10C", ifelse(Device_Serial == "Tank 3", "13C", "16C"))))
+ 
+#View(dat_2)
+#head(dat_2)
+
+
+
+# double checking this worked
+#dat_2$chamber <- as.factor(dat_2$chamber)
+#levels(dat_2$chamber)
+#str(dat_2)
+#summary(dat_2)
+
+#View(dat_2 %>% select(Channel, Device_Serial, chamber))
+
+# looks like it worked, all chambers are assigned to the correct rows
+
+# renaming oxygen data column and the delta_T columns to include units
+dat_2 <- dat_2 %>%
+  rename(oxygen = Value, delta_T_min = delta_t, time = Time, date = Date, temp = Temp)
+head(dat_2)
+
+
+# selecting only columns I need, and changing chamber column from a factor to a double
+dat_subset <- dat_2 %>%
+  dplyr::select(date, time, delta_T_min, oxygen, temp, chamber, treatment)
+
+  dat_subset$chamber <- as.numeric(dat_subset$chamber)
+
+# importing in other complementary data associated with chambers
+dat_chambers <- read_csv("data/210407_pineland_ambient/210407_pineland_datasheet_R.csv")
+#str(dat_chambers)
+dat_chambers$chamber <- as.numeric(dat_chambers$chamber)
+#View(dat_chambers)
+
+# joining DO data and chamber data by "chamber" column
+dat_full <- full_join(dat_subset, dat_chambers, by = "chamber")
+#View(dat_full)
+# converting oxygen concentration (mg/L) to oxygen mass (mg) by multipying by water volumes in chambers
+dat_full <- dat_full %>%
+  mutate(oxygen_mass_mg = oxygen * water_volume_L)
+#View(dat_full)
+```
+
+## Plotting DO and temp in chambers
+```{r echo = FALSE}
+# making treatment a factor variable and re-ordering it for plots
+dat_full$treatment <- factor(dat_full$treatment, levels = c("7C", "10C", "13C", "16C"))
+# making chamber a factor so that it's a discrete value for coloring datapoints in plot
+dat_full$chamber <- as.factor(dat_full$chamber)
+
+# plotting Do concentrations in each chamber
+DO_conc_plot <- dat_full %>%
+  ggplot(aes(x = delta_T_min, y = oxygen, color = chamber)) +
+  geom_line(size = 1.5) +
+  scale_color_viridis_d() +
+  facet_wrap(~treatment) +
+  labs(y = expression(Oxygen~Concentration~(mg~L^{-1})), x = "Elapsed Time (min)", title = "Pineland Ambient Incubation DO") +
+  theme_bw(base_size = 20)
+
+DO_conc_plot
+
+ggsave("plots/210407_pineland_ambient/210407_pineland_ambient_DO_conc_plot.png", plot = DO_conc_plot, width = 10, height = 7)
+
+# plotting temperature for each chamber
+temp_plot <- dat_full %>%
+  ggplot(aes(x = delta_T_min, y = temp, color = chamber)) +
+  geom_line(size = 1.5) +
+  scale_color_viridis_d() +
+  facet_wrap(~treatment) +
+  labs(y = expression('Temperature (\u00B0C)'), x = "Elapsed Time (min)", title = "Pineland Ambient Incubation Temperature") +
+  theme_bw(base_size = 20) +
+  theme(legend.position = "none")
+
+temp_plot
+
+ggsave("plots/210407_pineland_ambient/210407_pineland_ambient_temp_plot.png", plot = temp_plot, width = 10, height = 7)
+
+# plotting DO mass (mg) for each chamber
+DO_mass_plot <- dat_full %>%
+  ggplot(aes(x = delta_T_min, y = oxygen_mass_mg, color = chamber)) +
+  geom_line(size = 1.5) +
+  xlim(70, 380) +
+  scale_color_viridis_d() +
+  facet_wrap(~treatment) +
+  labs(y = expression(Oxygen~Mass~(mg)), x = "Elapsed Time (min)", title = "Pineland Ambient Incubation DO Mass") +
+  theme_bw(base_size = 20) +
+  theme(legend.position = "none")
+
+  DO_mass_plot
+  
+ggsave("plots/210407_pineland_ambient/210407_pineland_ambient_DO_mass_plot.png", plot = DO_mass_plot, width = 10, height = 7)
+
+# making interactive plot with plotly to help identity data points for rate calculations below
+p<- plotly::ggplotly(DO_mass_plot)
+p
+# exporting interactive plot to html
+htmlwidgets::saveWidget(as_widget(p), "plots/210407_pineland_ambient/210407_pineland_ambient_DO_mass_plot.html")
+
+```
+
+## Metabolic Rate Calculations
+### Tank 2; 7C
+#### Chamber 16
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 166 to minute 236 ##
+
+pnld_a_16 <- dat_full %>%
+  filter(chamber == "16" & delta_T_min >= 166 & delta_T_min <= 236)
+
+pnld_a_16_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_16)
+summary(pnld_a_16_NEP_mod)
+pnld_a_16_NEP_mod$coefficients[2]
+pnld_a_16_NEP_slope <- unname(pnld_a_16_NEP_mod$coefficients[2])
+
+# oxygen mass (mg) = 0.01659 * time(minutes) + 0.2537
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_16_NEP <- pnld_a_16_NEP_slope * 1440
+pnld_a_16_NEP
+
+######################## ER rate calculations
+
+## The linear portion of the ER curve has a very small signal, thus I measured ER from the dark period preceding the NEP portion of the incubation (roughly from minute 117 to minute 166) and the ER signal post-NEP period. The post-NEP ER curve has a low R^2 value, thus I just used the ER rate from the pre-NEP period alone.
+
+pnld_a_16 <- dat_full %>%
+  filter(chamber =="16" & delta_T_min >= 117 & delta_T_min <= 166)
+
+pnld_a_16_ER_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_16)
+summary(pnld_a_16_ER_mod)
+pnld_a_16_ER_mod$coefficients[2]
+pnld_a_16_ER_slope <- unname(pnld_a_16_ER_mod$coefficients[2])
+
+# oxygen mass (mg) = -0.01045 * time(minutes) + 30.49
+
+
+## now measuring ER from the period after the NEP portion of the incubation (oxygen curve stabilizes past minute 300).
+pnld_a_16 <- dat_full %>%
+  filter(chamber =="16" & delta_T_min >= 300)
+
+pnld_a_16_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, pnld_a_16)
+summary(pnld_a_16_ER_mod2)
+pnld_a_16_ER_mod2$coefficients[2]
+pnld_a_16_ER_slope2 <- unname(pnld_a_16_ER_mod2$coefficients[2])
+
+# oxygen mass (mg) = -0.00697 * time(minutes) + 29.41
+
+# calculate average of the two ER slopes
+pnld_a_16_ER_slope_avg <- pnld_a_16_ER_slope
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_16_ER <- pnld_a_16_ER_slope_avg * 1440
+pnld_a_16_ER
+
+######################## GPP
+pnld_a_16_GPP <- pnld_a_16_NEP - pnld_a_16_ER
+
+# plot of DO in this chamber to check that regressions match with data
+pnld_a_16_plot <- dat_full %>%
+  filter(chamber == "16") %>%
+  filter(delta_T_min > 100) %>%
+  ggplot(aes(x = delta_T_min, y = oxygen_mass_mg)) +
+  geom_point(shape = 1, size = 2) +
+  geom_abline(aes(intercept = pnld_a_16_NEP_mod$coefficients[1], slope = pnld_a_16_NEP_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_16_ER_mod$coefficients[1], slope = pnld_a_16_ER_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_16_ER_mod2$coefficients[1], slope = pnld_a_16_ER_mod2$coefficients[2])) +
+  theme_classic()
+pnld_a_16_plot
+```
+
+#### Chamber 15
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 166 to minute 236 ##
+
+pnld_a_15 <- dat_full %>%
+  filter(chamber == "15" & delta_T_min >= 166 & delta_T_min <= 236)
+
+pnld_a_15_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_15)
+summary(pnld_a_15_NEP_mod)
+pnld_a_15_NEP_mod$coefficients[2]
+pnld_a_15_NEP_slope <- unname(pnld_a_15_NEP_mod$coefficients[2])
+
+# oxygen mass (mg) = 0.01659 * time(minutes) + 0.2537
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_15_NEP <- pnld_a_15_NEP_slope * 1440
+pnld_a_15_NEP
+
+######################## ER rate calculations
+
+## The linear portion of the ER curve has a very small signal, thus I measured ER from the dark period preceding the NEP portion of the incubation (roughly from minute 117 to minute 166) and the ER signal post-NEP period. The post-NEP ER curve has a low R^2 value, thus I just used the ER rate from the pre-NEP period alone.
+
+pnld_a_15 <- dat_full %>%
+  filter(chamber =="15" & delta_T_min >= 117 & delta_T_min <= 166)
+
+pnld_a_15_ER_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_15)
+summary(pnld_a_15_ER_mod)
+pnld_a_15_ER_mod$coefficients[2]
+pnld_a_15_ER_slope <- unname(pnld_a_15_ER_mod$coefficients[2])
+
+# oxygen mass (mg) = -0.01045 * time(minutes) + 30.49
+
+
+## now measuring ER from the period after the NEP portion of the incubation.
+pnld_a_15 <- dat_full %>%
+  filter(chamber =="15" & delta_T_min >= 300)
+
+pnld_a_15_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, pnld_a_15)
+summary(pnld_a_15_ER_mod2)
+pnld_a_15_ER_mod2$coefficients[2]
+pnld_a_15_ER_slope2 <- unname(pnld_a_15_ER_mod2$coefficients[2])
+
+# oxygen mass (mg) = -0.00697 * time(minutes) + 29.41
+
+# calculate average of the two ER slopes
+pnld_a_15_ER_slope_avg <- pnld_a_15_ER_slope
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_15_ER <- pnld_a_15_ER_slope_avg * 1440
+pnld_a_15_ER
+
+######################## GPP
+pnld_a_15_GPP <- pnld_a_15_NEP - pnld_a_15_ER
+
+# plot of DO in this chamber to check that regressions match with data
+pnld_a_15_plot <- dat_full %>%
+  filter(chamber == "15") %>%
+  ggplot(aes(x = delta_T_min, y = oxygen_mass_mg)) +
+  geom_point(shape = 1, size = 2) +
+  geom_abline(aes(intercept = pnld_a_15_NEP_mod$coefficients[1], slope = pnld_a_15_NEP_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_15_ER_mod$coefficients[1], slope = pnld_a_15_ER_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_15_ER_mod2$coefficients[1], slope = pnld_a_15_ER_mod2$coefficients[2])) +
+  theme_classic()
+pnld_a_15_plot
+```
+
+#### Chamber 13
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 166 to minute 236 ##
+
+pnld_a_13 <- dat_full %>%
+  filter(chamber == "13" & delta_T_min >= 166 & delta_T_min <= 236)
+
+pnld_a_13_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_13)
+summary(pnld_a_13_NEP_mod)
+pnld_a_13_NEP_mod$coefficients[2]
+pnld_a_13_NEP_slope <- unname(pnld_a_13_NEP_mod$coefficients[2])
+
+# oxygen mass (mg) = 0.01659 * time(minutes) + 0.2537
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_13_NEP <- pnld_a_13_NEP_slope * 1440
+pnld_a_13_NEP
+
+######################## ER rate calculations
+
+## The linear portion of the ER curve has a very small signal, thus I measured ER from the dark period preceding the NEP portion of the incubation (roughly from minute 117 to minute 166) and the ER signal post-NEP period. The post-NEP ER curve has a low R^2 value, thus I just used the ER rate from the pre-NEP period alone.
+
+pnld_a_13 <- dat_full %>%
+  filter(chamber =="13" & delta_T_min >= 117 & delta_T_min <= 166)
+
+pnld_a_13_ER_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_13)
+summary(pnld_a_13_ER_mod)
+pnld_a_13_ER_mod$coefficients[2]
+pnld_a_13_ER_slope <- unname(pnld_a_13_ER_mod$coefficients[2])
+
+# oxygen mass (mg) = -0.01045 * time(minutes) + 30.49
+
+
+## now measuring ER from the period after the NEP portion of the incubation.
+pnld_a_13 <- dat_full %>%
+  filter(chamber =="13" & delta_T_min >= 300)
+
+pnld_a_13_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, pnld_a_13)
+summary(pnld_a_13_ER_mod2)
+pnld_a_13_ER_mod2$coefficients[2]
+pnld_a_13_ER_slope2 <- unname(pnld_a_13_ER_mod2$coefficients[2])
+
+# oxygen mass (mg) = -0.00697 * time(minutes) + 29.41
+
+# calculate average of the two ER slopes
+pnld_a_13_ER_slope_avg <- pnld_a_13_ER_slope
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_13_ER <- pnld_a_13_ER_slope_avg * 1440
+pnld_a_13_ER
+
+######################## GPP
+pnld_a_13_GPP <- pnld_a_13_NEP - pnld_a_13_ER
+
+# plot of DO in this chamber to check that regressions match with data
+pnld_a_13_plot <- dat_full %>%
+  filter(chamber == "13") %>%
+  ggplot(aes(x = delta_T_min, y = oxygen_mass_mg)) +
+  geom_point(shape = 1, size = 2) +
+  geom_abline(aes(intercept = pnld_a_13_NEP_mod$coefficients[1], slope = pnld_a_13_NEP_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_13_ER_mod$coefficients[1], slope = pnld_a_13_ER_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_13_ER_mod2$coefficients[1], slope = pnld_a_13_ER_mod2$coefficients[2])) +
+  theme_classic()
+pnld_a_13_plot
+```
+
+#### Chamber 4
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 166 to minute 236 ##
+
+pnld_a_4 <- dat_full %>%
+  filter(chamber == "4" & delta_T_min >= 166 & delta_T_min <= 236)
+
+pnld_a_4_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_4)
+summary(pnld_a_4_NEP_mod)
+pnld_a_4_NEP_mod$coefficients[2]
+pnld_a_4_NEP_slope <- unname(pnld_a_4_NEP_mod$coefficients[2])
+
+# oxygen mass (mg) = 0.01659 * time(minutes) + 0.2537
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_4_NEP <- pnld_a_4_NEP_slope * 1440
+pnld_a_4_NEP
+
+######################## ER rate calculations
+
+## The linear portion of the ER curve has a very small signal, thus I measured ER from the dark period preceding the NEP portion of the incubation (roughly from minute 117 to minute 166) and the ER signal post-NEP period. The post-NEP ER curve has a low R^2 value, thus I just used the ER rate from the pre-NEP period alone.
+
+pnld_a_4 <- dat_full %>%
+  filter(chamber =="4" & delta_T_min >= 117 & delta_T_min <= 166)
+
+pnld_a_4_ER_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_4)
+summary(pnld_a_4_ER_mod)
+pnld_a_4_ER_mod$coefficients[2]
+pnld_a_4_ER_slope <- unname(pnld_a_4_ER_mod$coefficients[2])
+
+# oxygen mass (mg) = -0.01045 * time(minutes) + 30.49
+
+
+## now measuring ER from the period after the NEP portion of the incubation.
+pnld_a_4 <- dat_full %>%
+  filter(chamber =="4" & delta_T_min >= 300)
+
+pnld_a_4_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, pnld_a_4)
+summary(pnld_a_4_ER_mod2)
+pnld_a_4_ER_mod2$coefficients[2]
+pnld_a_4_ER_slope2 <- unname(pnld_a_4_ER_mod2$coefficients[2])
+
+# oxygen mass (mg) = -0.00697 * time(minutes) + 29.41
+
+# calculate average of the two ER slopes
+pnld_a_4_ER_slope_avg <- pnld_a_4_ER_slope
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_4_ER <- pnld_a_4_ER_slope_avg * 1440
+pnld_a_4_ER
+
+######################## GPP
+pnld_a_4_GPP <- pnld_a_4_NEP - pnld_a_4_ER
+
+# plot of DO in this chamber to check that regressions match with data
+pnld_a_4_plot <- dat_full %>%
+  filter(chamber == "4") %>%
+  ggplot(aes(x = delta_T_min, y = oxygen_mass_mg)) +
+  geom_point(shape = 1, size = 2) +
+  geom_abline(aes(intercept = pnld_a_4_NEP_mod$coefficients[1], slope = pnld_a_4_NEP_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_4_ER_mod$coefficients[1], slope = pnld_a_4_ER_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_4_ER_mod2$coefficients[1], slope = pnld_a_4_ER_mod2$coefficients[2])) +
+  theme_classic()
+pnld_a_4_plot
+```
+
+
+### Tank 1; 10C
+
+#### Chamber 9
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 166 to minute 236 ##
+
+pnld_a_9 <- dat_full %>%
+  filter(chamber == "9" & delta_T_min >= 166 & delta_T_min <= 236)
+
+pnld_a_9_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_9)
+summary(pnld_a_9_NEP_mod)
+pnld_a_9_NEP_mod$coefficients[2]
+pnld_a_9_NEP_slope <- unname(pnld_a_9_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_9_NEP <- pnld_a_9_NEP_slope * 1440
+pnld_a_9_NEP
+
+######################## ER rate calculations
+
+## The linear portion of the ER curve has a very small signal, thus I measured ER from the dark period preceding the NEP portion of the incubation (roughly from minute 117 to minute 166) and averaged this with the ER signal post-NEP period.
+
+pnld_a_9 <- dat_full %>%
+  filter(chamber =="9" & delta_T_min >= 117 & delta_T_min <= 166)
+
+pnld_a_9_ER_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_9)
+summary(pnld_a_9_ER_mod)
+pnld_a_9_ER_mod$coefficients[2]
+pnld_a_9_ER_slope <- unname(pnld_a_9_ER_mod$coefficients[2])
+
+
+
+
+## now measuring ER from the period after the NEP portion of the incubation.
+pnld_a_9 <- dat_full %>%
+  filter(chamber =="9" & delta_T_min >= 300)
+
+pnld_a_9_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, pnld_a_9)
+summary(pnld_a_9_ER_mod2)
+pnld_a_9_ER_mod2$coefficients[2]
+pnld_a_9_ER_slope2 <- unname(pnld_a_9_ER_mod2$coefficients[2])
+
+
+
+# calculate average of the two ER slopes
+pnld_a_9_ER_slope_avg <- (pnld_a_9_ER_slope + pnld_a_9_ER_slope2)/2
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_9_ER <- pnld_a_9_ER_slope_avg * 1440
+pnld_a_9_ER
+
+######################## GPP
+pnld_a_9_GPP <- pnld_a_9_NEP - pnld_a_9_ER
+
+# plot of DO in this chamber to check that regressions match with data
+pnld_a_9_plot <- dat_full %>%
+  filter(chamber == "9") %>%
+  ggplot(aes(x = delta_T_min, y = oxygen_mass_mg)) +
+  geom_point(shape = 1, size = 2) +
+  geom_abline(aes(intercept = pnld_a_9_NEP_mod$coefficients[1], slope = pnld_a_9_NEP_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_9_ER_mod$coefficients[1], slope = pnld_a_9_ER_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_9_ER_mod2$coefficients[1], slope = pnld_a_9_ER_mod2$coefficients[2])) +
+  theme_classic()
+pnld_a_9_plot
+```
+
+
+#### Chamber 2
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 166 to minute 236 ##
+
+pnld_a_2 <- dat_full %>%
+  filter(chamber == "2" & delta_T_min >= 166 & delta_T_min <= 236)
+
+pnld_a_2_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_2)
+summary(pnld_a_2_NEP_mod)
+pnld_a_2_NEP_mod$coefficients[2]
+pnld_a_2_NEP_slope <- unname(pnld_a_2_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_2_NEP <- pnld_a_2_NEP_slope * 1440
+pnld_a_2_NEP
+
+######################## ER rate calculations
+
+## The linear portion of the ER curve has a very small signal, thus I measured ER from the dark period preceding the NEP portion of the incubation (roughly from minute 117 to minute 166) and averaged this with the ER signal post-NEP period.
+
+pnld_a_2 <- dat_full %>%
+  filter(chamber =="2" & delta_T_min >= 117 & delta_T_min <= 166)
+
+pnld_a_2_ER_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_2)
+summary(pnld_a_2_ER_mod)
+pnld_a_2_ER_mod$coefficients[2]
+pnld_a_2_ER_slope <- unname(pnld_a_2_ER_mod$coefficients[2])
+
+
+
+
+## now measuring ER from the period after the NEP portion of the incubation.
+pnld_a_2 <- dat_full %>%
+  filter(chamber =="2" & delta_T_min >= 300)
+
+pnld_a_2_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, pnld_a_2)
+summary(pnld_a_2_ER_mod2)
+pnld_a_2_ER_mod2$coefficients[2]
+pnld_a_2_ER_slope2 <- unname(pnld_a_2_ER_mod2$coefficients[2])
+
+
+
+# calculate average of the two ER slopes
+pnld_a_2_ER_slope_avg <- (pnld_a_2_ER_slope + pnld_a_2_ER_slope2)/2
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_2_ER <- pnld_a_2_ER_slope_avg * 1440
+pnld_a_2_ER
+
+######################## GPP
+pnld_a_2_GPP <- pnld_a_2_NEP - pnld_a_2_ER
+
+# plot of DO in this chamber to check that regressions match with data
+pnld_a_2_plot <- dat_full %>%
+  filter(chamber == "2") %>%
+  ggplot(aes(x = delta_T_min, y = oxygen_mass_mg)) +
+  geom_point(shape = 1, size = 2) +
+  geom_abline(aes(intercept = pnld_a_2_NEP_mod$coefficients[1], slope = pnld_a_2_NEP_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_2_ER_mod$coefficients[1], slope = pnld_a_2_ER_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_2_ER_mod2$coefficients[1], slope = pnld_a_2_ER_mod2$coefficients[2])) +
+  theme_classic()
+pnld_a_2_plot
+```
+
+#### Chamber 11
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 166 to minute 236 ##
+
+pnld_a_11 <- dat_full %>%
+  filter(chamber == "11" & delta_T_min >= 166 & delta_T_min <= 236)
+
+pnld_a_11_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_11)
+summary(pnld_a_11_NEP_mod)
+pnld_a_11_NEP_mod$coefficients[2]
+pnld_a_11_NEP_slope <- unname(pnld_a_11_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_11_NEP <- pnld_a_11_NEP_slope * 1440
+pnld_a_11_NEP
+
+######################## ER rate calculations
+
+## The linear portion of the ER curve has a very small signal, thus I measured ER from the dark period preceding the NEP portion of the incubation (roughly from minute 117 to minute 166) and averaged this with the ER signal post-NEP period.
+
+pnld_a_11 <- dat_full %>%
+  filter(chamber =="11" & delta_T_min >= 117 & delta_T_min <= 166)
+
+pnld_a_11_ER_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_11)
+summary(pnld_a_11_ER_mod)
+pnld_a_11_ER_mod$coefficients[2]
+pnld_a_11_ER_slope <- unname(pnld_a_11_ER_mod$coefficients[2])
+
+
+
+
+## now measuring ER from the period after the NEP portion of the incubation.
+pnld_a_11 <- dat_full %>%
+  filter(chamber =="11" & delta_T_min >= 300)
+
+pnld_a_11_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, pnld_a_11)
+summary(pnld_a_11_ER_mod2)
+pnld_a_11_ER_mod2$coefficients[2]
+pnld_a_11_ER_slope2 <- unname(pnld_a_11_ER_mod2$coefficients[2])
+
+
+
+# calculate average of the two ER slopes
+pnld_a_11_ER_slope_avg <- (pnld_a_11_ER_slope + pnld_a_11_ER_slope2)/2
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_11_ER <- pnld_a_11_ER_slope_avg * 1440
+pnld_a_11_ER
+
+######################## GPP
+pnld_a_11_GPP <- pnld_a_11_NEP - pnld_a_11_ER
+
+# plot of DO in this chamber to check that regressions match with data
+pnld_a_11_plot <- dat_full %>%
+  filter(chamber == "11") %>%
+  ggplot(aes(x = delta_T_min, y = oxygen_mass_mg)) +
+  geom_point(shape = 1, size = 2) +
+  geom_abline(aes(intercept = pnld_a_11_NEP_mod$coefficients[1], slope = pnld_a_11_NEP_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_11_ER_mod$coefficients[1], slope = pnld_a_11_ER_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_11_ER_mod2$coefficients[1], slope = pnld_a_11_ER_mod2$coefficients[2])) +
+  theme_classic()
+pnld_a_11_plot
+```
+
+
+#### Chamber 6
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 166 to minute 236 ##
+
+pnld_a_6 <- dat_full %>%
+  filter(chamber == "6" & delta_T_min >= 166 & delta_T_min <= 236)
+
+pnld_a_6_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_6)
+summary(pnld_a_6_NEP_mod)
+pnld_a_6_NEP_mod$coefficients[2]
+pnld_a_6_NEP_slope <- unname(pnld_a_6_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_6_NEP <- pnld_a_6_NEP_slope * 1440
+pnld_a_6_NEP
+
+######################## ER rate calculations
+
+## The linear portion of the ER curve has a very small signal, thus I measured ER from the dark period preceding the NEP portion of the incubation (roughly from minute 117 to minute 166) and averaged this with the ER signal post-NEP period.
+
+pnld_a_6 <- dat_full %>%
+  filter(chamber =="6" & delta_T_min >= 117 & delta_T_min <= 166)
+
+pnld_a_6_ER_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_6)
+summary(pnld_a_6_ER_mod)
+pnld_a_6_ER_mod$coefficients[2]
+pnld_a_6_ER_slope <- unname(pnld_a_6_ER_mod$coefficients[2])
+
+
+
+
+## now measuring ER from the period after the NEP portion of the incubation.
+pnld_a_6 <- dat_full %>%
+  filter(chamber =="6" & delta_T_min >= 300)
+
+pnld_a_6_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, pnld_a_6)
+summary(pnld_a_6_ER_mod2)
+pnld_a_6_ER_mod2$coefficients[2]
+pnld_a_6_ER_slope2 <- unname(pnld_a_6_ER_mod2$coefficients[2])
+
+
+
+# calculate average of the two ER slopes
+pnld_a_6_ER_slope_avg <- (pnld_a_6_ER_slope + pnld_a_6_ER_slope2)/2
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_6_ER <- pnld_a_6_ER_slope_avg * 1440
+pnld_a_6_ER
+
+######################## GPP
+pnld_a_6_GPP <- pnld_a_6_NEP - pnld_a_6_ER
+
+# plot of DO in this chamber to check that regressions match with data
+pnld_a_6_plot <- dat_full %>%
+  filter(chamber == "6") %>%
+  ggplot(aes(x = delta_T_min, y = oxygen_mass_mg)) +
+  geom_point(shape = 1, size = 2) +
+  geom_abline(aes(intercept = pnld_a_6_NEP_mod$coefficients[1], slope = pnld_a_6_NEP_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_6_ER_mod$coefficients[1], slope = pnld_a_6_ER_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_6_ER_mod2$coefficients[1], slope = pnld_a_6_ER_mod2$coefficients[2])) +
+  theme_classic()
+pnld_a_6_plot
+```
+
+### Tank 3; 13C
+#### Chamber 12
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 166 to minute 236 ##
+
+pnld_a_12 <- dat_full %>%
+  filter(chamber == "12" & delta_T_min >= 166 & delta_T_min <= 236)
+
+pnld_a_12_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_12)
+summary(pnld_a_12_NEP_mod)
+pnld_a_12_NEP_mod$coefficients[2]
+pnld_a_12_NEP_slope <- unname(pnld_a_12_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_12_NEP <- pnld_a_12_NEP_slope * 1440
+pnld_a_12_NEP
+
+######################## ER rate calculations
+
+## The linear portion of the ER curve has a very small signal, thus I measured ER from the dark period preceding the NEP portion of the incubation (roughly from minute 117 to minute 166) and averaged this with the ER signal post-NEP period.
+
+pnld_a_12 <- dat_full %>%
+  filter(chamber =="12" & delta_T_min >= 117 & delta_T_min <= 166)
+
+pnld_a_12_ER_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_12)
+summary(pnld_a_12_ER_mod)
+pnld_a_12_ER_mod$coefficients[2]
+pnld_a_12_ER_slope <- unname(pnld_a_12_ER_mod$coefficients[2])
+
+
+
+
+## now measuring ER from the period after the NEP portion of the incubation.
+pnld_a_12 <- dat_full %>%
+  filter(chamber =="12" & delta_T_min >= 265)
+
+pnld_a_12_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, pnld_a_12)
+summary(pnld_a_12_ER_mod2)
+pnld_a_12_ER_mod2$coefficients[2]
+pnld_a_12_ER_slope2 <- unname(pnld_a_12_ER_mod2$coefficients[2])
+
+
+
+# calculate average of the two ER slopes
+pnld_a_12_ER_slope_avg <- (pnld_a_12_ER_slope + pnld_a_12_ER_slope2)/2
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_12_ER <- pnld_a_12_ER_slope_avg * 1440
+pnld_a_12_ER
+
+######################## GPP
+pnld_a_12_GPP <- pnld_a_12_NEP - pnld_a_12_ER
+
+# plot of DO in this chamber to check that regressions match with data
+pnld_a_12_plot <- dat_full %>%
+  filter(chamber == "12") %>%
+  ggplot(aes(x = delta_T_min, y = oxygen_mass_mg)) +
+  geom_point(shape = 1, size = 2) +
+  geom_abline(aes(intercept = pnld_a_12_NEP_mod$coefficients[1], slope = pnld_a_12_NEP_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_12_ER_mod$coefficients[1], slope = pnld_a_12_ER_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_12_ER_mod2$coefficients[1], slope = pnld_a_12_ER_mod2$coefficients[2])) +
+  theme_classic()
+pnld_a_12_plot
+```
+
+
+#### Chamber 14
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 166 to minute 236 ##
+
+pnld_a_14 <- dat_full %>%
+  filter(chamber == "14" & delta_T_min >= 166 & delta_T_min <= 236)
+
+pnld_a_14_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_14)
+summary(pnld_a_14_NEP_mod)
+pnld_a_14_NEP_mod$coefficients[2]
+pnld_a_14_NEP_slope <- unname(pnld_a_14_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_14_NEP <- pnld_a_14_NEP_slope * 1440
+pnld_a_14_NEP
+
+######################## ER rate calculations
+
+## The linear portion of the ER curve has a very small signal, thus I measured ER from the dark period preceding the NEP portion of the incubation (roughly from minute 117 to minute 166) and averaged this with the ER signal post-NEP period.
+
+pnld_a_14 <- dat_full %>%
+  filter(chamber =="14" & delta_T_min >= 117 & delta_T_min <= 166)
+
+pnld_a_14_ER_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_14)
+summary(pnld_a_14_ER_mod)
+pnld_a_14_ER_mod$coefficients[2]
+pnld_a_14_ER_slope <- unname(pnld_a_14_ER_mod$coefficients[2])
+
+
+
+
+## now measuring ER from the period after the NEP portion of the incubation.
+pnld_a_14 <- dat_full %>%
+  filter(chamber =="14" & delta_T_min >= 265)
+
+pnld_a_14_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, pnld_a_14)
+summary(pnld_a_14_ER_mod2)
+pnld_a_14_ER_mod2$coefficients[2]
+pnld_a_14_ER_slope2 <- unname(pnld_a_14_ER_mod2$coefficients[2])
+
+
+
+# calculate average of the two ER slopes
+pnld_a_14_ER_slope_avg <- (pnld_a_14_ER_slope + pnld_a_14_ER_slope2)/2
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_14_ER <- pnld_a_14_ER_slope_avg * 1440
+pnld_a_14_ER
+
+######################## GPP
+pnld_a_14_GPP <- pnld_a_14_NEP - pnld_a_14_ER
+
+# plot of DO in this chamber to check that regressions match with data
+pnld_a_14_plot <- dat_full %>%
+  filter(chamber == "14") %>%
+  ggplot(aes(x = delta_T_min, y = oxygen_mass_mg)) +
+  geom_point(shape = 1, size = 2) +
+  geom_abline(aes(intercept = pnld_a_14_NEP_mod$coefficients[1], slope = pnld_a_14_NEP_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_14_ER_mod$coefficients[1], slope = pnld_a_14_ER_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_14_ER_mod2$coefficients[1], slope = pnld_a_14_ER_mod2$coefficients[2])) +
+  theme_classic()
+pnld_a_14_plot
+```
+
+
+#### Chamber 8
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 166 to minute 236 ##
+
+pnld_a_8 <- dat_full %>%
+  filter(chamber == "8" & delta_T_min >= 166 & delta_T_min <= 236)
+
+pnld_a_8_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_8)
+summary(pnld_a_8_NEP_mod)
+pnld_a_8_NEP_mod$coefficients[2]
+pnld_a_8_NEP_slope <- unname(pnld_a_8_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_8_NEP <- pnld_a_8_NEP_slope * 1440
+pnld_a_8_NEP
+
+######################## ER rate calculations
+
+## The linear portion of the ER curve has a very small signal, thus I measured ER from the dark period preceding the NEP portion of the incubation (roughly from minute 117 to minute 166) and averaged this with the ER signal post-NEP period.
+
+pnld_a_8 <- dat_full %>%
+  filter(chamber =="8" & delta_T_min >= 117 & delta_T_min <= 166)
+
+pnld_a_8_ER_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_8)
+summary(pnld_a_8_ER_mod)
+pnld_a_8_ER_mod$coefficients[2]
+pnld_a_8_ER_slope <- unname(pnld_a_8_ER_mod$coefficients[2])
+
+
+
+
+## now measuring ER from the period after the NEP portion of the incubation.
+pnld_a_8 <- dat_full %>%
+  filter(chamber =="8" & delta_T_min >= 265)
+
+pnld_a_8_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, pnld_a_8)
+summary(pnld_a_8_ER_mod2)
+pnld_a_8_ER_mod2$coefficients[2]
+pnld_a_8_ER_slope2 <- unname(pnld_a_8_ER_mod2$coefficients[2])
+
+
+
+# calculate average of the two ER slopes
+pnld_a_8_ER_slope_avg <- (pnld_a_8_ER_slope + pnld_a_8_ER_slope2)/2
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_8_ER <- pnld_a_8_ER_slope_avg * 1440
+pnld_a_8_ER
+
+######################## GPP
+pnld_a_8_GPP <- pnld_a_8_NEP - pnld_a_8_ER
+
+# plot of DO in this chamber to check that regressions match with data
+pnld_a_8_plot <- dat_full %>%
+  filter(chamber == "8") %>%
+  ggplot(aes(x = delta_T_min, y = oxygen_mass_mg)) +
+  geom_point(shape = 1, size = 2) +
+  geom_abline(aes(intercept = pnld_a_8_NEP_mod$coefficients[1], slope = pnld_a_8_NEP_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_8_ER_mod$coefficients[1], slope = pnld_a_8_ER_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_8_ER_mod2$coefficients[1], slope = pnld_a_8_ER_mod2$coefficients[2])) +
+  theme_classic()
+pnld_a_8_plot
+```
+
+#### Chamber 1
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 166 to minute 236 ##
+
+pnld_a_1 <- dat_full %>%
+  filter(chamber == "1" & delta_T_min >= 166 & delta_T_min <= 236)
+
+pnld_a_1_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_1)
+summary(pnld_a_1_NEP_mod)
+pnld_a_1_NEP_mod$coefficients[2]
+pnld_a_1_NEP_slope <- unname(pnld_a_1_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_1_NEP <- pnld_a_1_NEP_slope * 1440
+pnld_a_1_NEP
+
+######################## ER rate calculations
+
+## The linear portion of the ER curve has a very small signal, thus I measured ER from the dark period preceding the NEP portion of the incubation (roughly from minute 117 to minute 166) and averaged this with the ER signal post-NEP period.
+
+pnld_a_1 <- dat_full %>%
+  filter(chamber =="1" & delta_T_min >= 117 & delta_T_min <= 166)
+
+pnld_a_1_ER_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_1)
+summary(pnld_a_1_ER_mod)
+pnld_a_1_ER_mod$coefficients[2]
+pnld_a_1_ER_slope <- unname(pnld_a_1_ER_mod$coefficients[2])
+
+
+
+
+## now measuring ER from the period after the NEP portion of the incubation.
+pnld_a_1 <- dat_full %>%
+  filter(chamber =="1" & delta_T_min >= 265)
+
+pnld_a_1_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, pnld_a_1)
+summary(pnld_a_1_ER_mod2)
+pnld_a_1_ER_mod2$coefficients[2]
+pnld_a_1_ER_slope2 <- unname(pnld_a_1_ER_mod2$coefficients[2])
+
+
+
+# calculate average of the two ER slopes
+pnld_a_1_ER_slope_avg <- (pnld_a_1_ER_slope + pnld_a_1_ER_slope2)/2
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_1_ER <- pnld_a_1_ER_slope_avg * 1440
+pnld_a_1_ER
+
+######################## GPP
+pnld_a_1_GPP <- pnld_a_1_NEP - pnld_a_1_ER
+
+# plot of DO in this chamber to check that regressions match with data
+pnld_a_1_plot <- dat_full %>%
+  filter(chamber == "1") %>%
+  ggplot(aes(x = delta_T_min, y = oxygen_mass_mg)) +
+  geom_point(shape = 1, size = 2) +
+  geom_abline(aes(intercept = pnld_a_1_NEP_mod$coefficients[1], slope = pnld_a_1_NEP_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_1_ER_mod$coefficients[1], slope = pnld_a_1_ER_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_1_ER_mod2$coefficients[1], slope = pnld_a_1_ER_mod2$coefficients[2])) +
+  theme_classic()
+pnld_a_1_plot
+```
+
+### Tank 4; 16C
+#### Chamber 3
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 166 to minute 250, but chambers did not stir properly during dark period but were fixed around minute 240, thus I included data after chambers were allowed to stir and equilibrate properly (minutes 245-250). ##
+
+pnld_a_3 <- dat_full %>%
+  filter(chamber == "3" & delta_T_min >= 166 & delta_T_min <= 168 | chamber == "3" & delta_T_min >= 245 & delta_T_min <= 250)
+
+pnld_a_3_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_3)
+summary(pnld_a_3_NEP_mod)
+pnld_a_3_NEP_mod$coefficients[2]
+pnld_a_3_NEP_slope <- unname(pnld_a_3_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_3_NEP <- pnld_a_3_NEP_slope * 1440
+pnld_a_3_NEP
+
+######################## ER rate calculations
+
+## The linear portion of the ER curve is only clean after the NEP portion of the incubation, thus I only used this portion of the DO curve in the analysis.
+
+pnld_a_3 <- dat_full %>%
+  filter(chamber =="3" & delta_T_min >= 155 & delta_T_min <= 168)
+
+pnld_a_3_ER_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_3)
+summary(pnld_a_3_ER_mod)
+pnld_a_3_ER_mod$coefficients[2]
+pnld_a_3_ER_slope <- unname(pnld_a_3_ER_mod$coefficients[2])
+
+
+
+
+## now measuring ER from the period after the NEP portion of the incubation.
+pnld_a_3 <- dat_full %>%
+  filter(chamber =="3" & delta_T_min >= 255)
+
+pnld_a_3_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, pnld_a_3)
+summary(pnld_a_3_ER_mod2)
+pnld_a_3_ER_mod2$coefficients[2]
+pnld_a_3_ER_slope2 <- unname(pnld_a_3_ER_mod2$coefficients[2])
+
+
+
+# calculate average of the two ER slopes
+pnld_a_3_ER_slope_avg <- pnld_a_3_ER_slope2
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_3_ER <- pnld_a_3_ER_slope_avg * 1440
+pnld_a_3_ER
+
+######################## GPP
+pnld_a_3_GPP <- pnld_a_3_NEP - pnld_a_3_ER
+
+# plot of DO in this chamber to check that regressions match with data
+pnld_a_3_plot <- dat_full %>%
+  filter(chamber == "3") %>%
+  ggplot(aes(x = delta_T_min, y = oxygen_mass_mg)) +
+  geom_point(shape = 1, size = 2) +
+  geom_abline(aes(intercept = pnld_a_3_NEP_mod$coefficients[1], slope = pnld_a_3_NEP_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_3_ER_mod$coefficients[1], slope = pnld_a_3_ER_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_3_ER_mod2$coefficients[1], slope = pnld_a_3_ER_mod2$coefficients[2])) +
+  theme_classic()
+pnld_a_3_plot
+```
+
+
+#### Chamber 7
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 166 to minute 250, but chambers did not stir properly during dark period but were fixed around minute 240, thus I included data after chambers were allowed to stir and equilibrate properly (minutes 245-250). ##
+
+pnld_a_7 <- dat_full %>%
+  filter(chamber == "7" & delta_T_min >= 166 & delta_T_min <= 168 | chamber == "7" & delta_T_min >= 245 & delta_T_min <= 250)
+
+pnld_a_7_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_7)
+summary(pnld_a_7_NEP_mod)
+pnld_a_7_NEP_mod$coefficients[2]
+pnld_a_7_NEP_slope <- unname(pnld_a_7_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_7_NEP <- pnld_a_7_NEP_slope * 1440
+pnld_a_7_NEP
+
+######################## ER rate calculations
+
+## The linear portion of the ER curve is only clean after the NEP portion of the incubation, thus I only used this portion of the DO curve in the analysis.
+
+pnld_a_7 <- dat_full %>%
+  filter(chamber =="7" & delta_T_min >= 155 & delta_T_min <= 168)
+
+pnld_a_7_ER_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_7)
+summary(pnld_a_7_ER_mod)
+pnld_a_7_ER_mod$coefficients[2]
+pnld_a_7_ER_slope <- unname(pnld_a_7_ER_mod$coefficients[2])
+
+
+
+
+## now measuring ER from the period after the NEP portion of the incubation.
+pnld_a_7 <- dat_full %>%
+  filter(chamber =="7" & delta_T_min >= 255)
+
+pnld_a_7_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, pnld_a_7)
+summary(pnld_a_7_ER_mod2)
+pnld_a_7_ER_mod2$coefficients[2]
+pnld_a_7_ER_slope2 <- unname(pnld_a_7_ER_mod2$coefficients[2])
+
+
+
+# calculate average of the two ER slopes
+pnld_a_7_ER_slope_avg <- pnld_a_7_ER_slope2
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_7_ER <- pnld_a_7_ER_slope_avg * 1440
+pnld_a_7_ER
+
+######################## GPP
+pnld_a_7_GPP <- pnld_a_7_NEP - pnld_a_7_ER
+
+# plot of DO in this chamber to check that regressions match with data
+pnld_a_7_plot <- dat_full %>%
+  filter(chamber == "7") %>%
+  ggplot(aes(x = delta_T_min, y = oxygen_mass_mg)) +
+  geom_point(shape = 1, size = 2) +
+  geom_abline(aes(intercept = pnld_a_7_NEP_mod$coefficients[1], slope = pnld_a_7_NEP_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_7_ER_mod$coefficients[1], slope = pnld_a_7_ER_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_7_ER_mod2$coefficients[1], slope = pnld_a_7_ER_mod2$coefficients[2])) +
+  theme_classic()
+pnld_a_7_plot
+```
+
+
+#### Chamber 10
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 166 to minute 250, but chambers did not stir properly during dark period but were fixed around minute 240, thus I included data after chambers were allowed to stir and equilibrate properly (minutes 245-250). ##
+
+pnld_a_10 <- dat_full %>%
+  filter(chamber == "10" & delta_T_min >= 166 & delta_T_min <= 168 | chamber == "10" & delta_T_min >= 245 & delta_T_min <= 250)
+
+pnld_a_10_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_10)
+summary(pnld_a_10_NEP_mod)
+pnld_a_10_NEP_mod$coefficients[2]
+pnld_a_10_NEP_slope <- unname(pnld_a_10_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_10_NEP <- pnld_a_10_NEP_slope * 1440
+pnld_a_10_NEP
+
+######################## ER rate calculations
+
+## The linear portion of the ER curve is only clean after the NEP portion of the incubation, thus I only used this portion of the DO curve in the analysis.
+
+pnld_a_10 <- dat_full %>%
+  filter(chamber =="10" & delta_T_min >= 155 & delta_T_min <= 168)
+
+pnld_a_10_ER_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_10)
+summary(pnld_a_10_ER_mod)
+pnld_a_10_ER_mod$coefficients[2]
+pnld_a_10_ER_slope <- unname(pnld_a_10_ER_mod$coefficients[2])
+
+
+
+
+## now measuring ER from the period after the NEP portion of the incubation.
+pnld_a_10 <- dat_full %>%
+  filter(chamber =="10" & delta_T_min >= 255)
+
+pnld_a_10_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, pnld_a_10)
+summary(pnld_a_10_ER_mod2)
+pnld_a_10_ER_mod2$coefficients[2]
+pnld_a_10_ER_slope2 <- unname(pnld_a_10_ER_mod2$coefficients[2])
+
+
+
+# calculate average of the two ER slopes
+pnld_a_10_ER_slope_avg <- pnld_a_10_ER_slope2
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_10_ER <- pnld_a_10_ER_slope_avg * 1440
+pnld_a_10_ER
+
+######################## GPP
+pnld_a_10_GPP <- pnld_a_10_NEP - pnld_a_10_ER
+
+# plot of DO in this chamber to check that regressions match with data
+pnld_a_10_plot <- dat_full %>%
+  filter(chamber == "10") %>%
+  ggplot(aes(x = delta_T_min, y = oxygen_mass_mg)) +
+  geom_point(shape = 1, size = 2) +
+  geom_abline(aes(intercept = pnld_a_10_NEP_mod$coefficients[1], slope = pnld_a_10_NEP_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_10_ER_mod$coefficients[1], slope = pnld_a_10_ER_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_10_ER_mod2$coefficients[1], slope = pnld_a_10_ER_mod2$coefficients[2])) +
+  theme_classic()
+pnld_a_10_plot
+```
+
+
+#### Chamber 5
+```{r}
+######################## NEP rate calculations
+
+## the linear portion of the NEP curve is roughly from minute 166 to minute 250, but chambers did not stir properly during dark period but were fixed around minute 240, thus I included data after chambers were allowed to stir and equilibrate properly (minutes 245-250). ##
+
+pnld_a_5 <- dat_full %>%
+  filter(chamber == "5" & delta_T_min >= 166 & delta_T_min <= 168 | chamber == "5" & delta_T_min >= 245 & delta_T_min <= 250)
+
+pnld_a_5_NEP_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_5)
+summary(pnld_a_5_NEP_mod)
+pnld_a_5_NEP_mod$coefficients[2]
+pnld_a_5_NEP_slope <- unname(pnld_a_5_NEP_mod$coefficients[2])
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_5_NEP <- pnld_a_5_NEP_slope * 1440
+pnld_a_5_NEP
+
+######################## ER rate calculations
+
+## The linear portion of the ER curve is only clean after the NEP portion of the incubation, thus I only used this portion of the DO curve in the analysis.
+
+pnld_a_5 <- dat_full %>%
+  filter(chamber =="5" & delta_T_min >= 155 & delta_T_min <= 168)
+
+pnld_a_5_ER_mod <- lm(oxygen_mass_mg~delta_T_min, pnld_a_5)
+summary(pnld_a_5_ER_mod)
+pnld_a_5_ER_mod$coefficients[2]
+pnld_a_5_ER_slope <- unname(pnld_a_5_ER_mod$coefficients[2])
+
+
+
+
+## now measuring ER from the period after the NEP portion of the incubation.
+pnld_a_5 <- dat_full %>%
+  filter(chamber =="5" & delta_T_min >= 255)
+
+pnld_a_5_ER_mod2 <- lm(oxygen_mass_mg~delta_T_min, pnld_a_5)
+summary(pnld_a_5_ER_mod2)
+pnld_a_5_ER_mod2$coefficients[2]
+pnld_a_5_ER_slope2 <- unname(pnld_a_5_ER_mod2$coefficients[2])
+
+
+
+# calculate average of the two ER slopes
+pnld_a_5_ER_slope_avg <- pnld_a_5_ER_slope2
+
+
+## Now converting this rate from mg O2 per minute to per day by multiplying this rate by 1440 minutes per day. ##
+pnld_a_5_ER <- pnld_a_5_ER_slope_avg * 1440
+pnld_a_5_ER
+
+######################## GPP
+pnld_a_5_GPP <- pnld_a_5_NEP - pnld_a_5_ER
+
+# plot of DO in this chamber to check that regressions match with data
+pnld_a_5_plot <- dat_full %>%
+  filter(chamber == "5") %>%
+  ggplot(aes(x = delta_T_min, y = oxygen_mass_mg)) +
+  geom_point(shape = 1, size = 2) +
+  geom_abline(aes(intercept = pnld_a_5_NEP_mod$coefficients[1], slope = pnld_a_5_NEP_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_5_ER_mod$coefficients[1], slope = pnld_a_5_ER_mod$coefficients[2])) +
+  geom_abline(aes(intercept = pnld_a_5_ER_mod2$coefficients[1], slope = pnld_a_5_ER_mod2$coefficients[2])) +
+  theme_classic()
+pnld_a_5_plot
+```
+
+## Creating dataframe with metab rates
+```{r}
+# creating dataframe of metab rates to make barplot
+## excluding chamber 15 since it had anomalous values due to a faulty stirrer
+pnld_a_rates <- data.frame(
+  "NEP_mg_d" = c(pnld_a_1_NEP, pnld_a_2_NEP, pnld_a_3_NEP, pnld_a_4_NEP, pnld_a_5_NEP, pnld_a_6_NEP, pnld_a_7_NEP, pnld_a_8_NEP, pnld_a_9_NEP, pnld_a_10_NEP, pnld_a_11_NEP, pnld_a_12_NEP, pnld_a_13_NEP, pnld_a_14_NEP, pnld_a_15_NEP, pnld_a_16_NEP),
+  "ER_mg_d" = c(pnld_a_1_ER, pnld_a_2_ER, pnld_a_3_ER, pnld_a_4_ER, pnld_a_5_ER, pnld_a_6_ER, pnld_a_7_ER, pnld_a_8_ER, pnld_a_9_ER, pnld_a_10_ER, pnld_a_11_ER, pnld_a_12_ER, pnld_a_13_ER, pnld_a_14_ER, pnld_a_15_ER,  pnld_a_16_ER),
+  "chamber" = c("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"))
+head(pnld_a_rates)
+#str(pnld_a_rates)
+
+# formatting data types of columns
+pnld_a_rates$NEP_mg_d <- as.numeric(pnld_a_rates$NEP_mg_d)
+pnld_a_rates$ER_mg_d <- as.numeric(pnld_a_rates$ER_mg_d)
+
+# calculating GPP from NEP and ER columns
+pnld_a_rates <- pnld_a_rates %>%
+  mutate(GPP_mg_d = NEP_mg_d - ER_mg_d)
+head(pnld_a_rates)
+```
+
+## Joining metab rates dataframe with chamber dataframe
+```{r}
+# changing chamber column in datasheet to character to be compatable to joining to pnld_a_rates
+dat_chambers$chamber <- as.factor(dat_chambers$chamber)
+
+# joining chamber and metabolic rate data
+dat_final <- full_join(dat_chambers, pnld_a_rates, by = "chamber")
+#View(dat_final)
+
+# adding temperature treatment (discrete factor) and temp_C (continuous numeric) columns based off of tank column already in data
+dat_final <- dat_final %>%
+  mutate(
+    treatment = case_when(
+      tank == "1" ~ "10C",
+      tank == "2" ~ "7C",
+      tank == "3" ~ "13C",
+      tank == "4" ~ "16C"
+    )) %>%
+  mutate(
+    temp_C = case_when(
+           tank == "1" ~ "10",
+           tank == "2" ~ "7",
+           tank == "3" ~ "13",
+           tank == "4" ~ "16"
+           ))
+
+# making temp_C column numberic and not a factor
+dat_final$temp_C <- as.numeric(dat_final$temp_C)
+
+#View(dat_final)
+```
+
+## Normalizing metabolic rates
+```{r}
+# normalizing metabolic rates by AFDW and by rock surface area
+dat_final <- dat_final %>%
+  mutate(GPP_mgO2_d_gAFDW = GPP_mg_d/total_AFDW_g, NEP_mgO2_d_gAFDW = NEP_mg_d/total_AFDW_g, ER_mgO2_d_gAFDW = ER_mg_d/total_AFDW_g) %>%
+  mutate(GPP_mgO2_d_m2 = GPP_mg_d/rock_SA_m2, NEP_mgO2_d_m2 = NEP_mg_d/rock_SA_m2, ER_mgO2_d_m2 = ER_mg_d/rock_SA_m2)
+
+#View(dat_final)
+```
+
+# Exporting metabolic rate data for further analysis
+```{r}
+# making identifier column for joining to ambient incubation data for nutrient effect analysis
+dat_final_a <- dat_final %>%
+  mutate(nutrient_trt = "ambient")
+# exporting data for final analysis
+write_csv(dat_final_a, "data/210407_pineland_ambient/210407_pnld_ambient_rates.csv")
+```
+
+11/16/21-- went through script and double-checked timings used to delineate NEP and ER portions of DO curves and cross-checked these with notes and DO datasheets. Tank 2 and Tank 4 seem to have lags in stirring rates during the NEP incubation that may lead to underestimation of NEP rates, and some of the timings were changed to accomodate for the lag in peak DO concentrations.
+
+Changed the ER rates in some of the tanks to only use the post-NEP portion of DO curves for calculating ER instead of averaging pre- and post-NEP portions to get ER. This was done because the R^2 values were low and there was considerable variability in pre-NEP portions of DO curves.

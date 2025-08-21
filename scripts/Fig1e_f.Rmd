@@ -1,0 +1,93 @@
+---
+title: "Peri_biomass_plot_adapted_from_KA2021"
+output: html_document
+date: "2022-12-22"
+---
+Creating plot adapted from figure 4 in atkins et al 2021 (DOI: 10.1007/s10750-021-04533-w) of periphyton biomass in Lake Tahoe.
+
+Input data files include median periphyton biomass values (AFDW and Chla) between 1982 and 2019 that were extracted from the paper using webplot digitizer on 12/22/22 (months coded as numbers (1-12 starting with sept)).
+
+Output files are plots of these values exported as jpg files.
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(ggpubr)
+library(plotly)
+library(reshape2)
+library(DescTools)
+library(arm)
+library(nlme)
+library(lattice)
+library(emmeans)
+library(sjPlot)
+library(sjmisc)
+library(sjlabelled)
+library(patchwork)
+library(gt)
+
+# changing working directory from /scripts to /tahoe_lab_inc_analysis
+knitr::opts_chunk$set(root.dir = '..')
+```
+
+# Loading data frame
+```{r, include = FALSE}
+# importing AFDW data
+### colnames are not in the original file, so they're added below
+AFDW <- read_csv("data/main_analysis/Karen_Atkins_AFDW_data.csv", col_names = FALSE)
+colnames(AFDW) <- c("Month_num", "AFDW_g_m2")
+#View(AFDW)
+
+# importing Chla data
+### colnames are not in the original file, so they're added below
+Chla <- read_csv("data/main_analysis/Karen_Atkins_Chla_data.csv", col_names = FALSE)
+colnames(Chla) <- c("Month_num", "Chla_mg_m2")
+#View(Chla)
+
+# creating vector of months (with correct levels) to combine with the above data frames (goes by water year Oct-Oct)
+Month <- c("Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep")
+Month = factor(Month, levels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"))
+
+# appending month column to dataframe
+AFDW <- data.frame(AFDW, Month)
+
+Chla <- data_frame(Chla, Month)
+
+# adjusting the order of levels so that they plot in the calendar-year order
+Month = factor(Month, levels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"))
+
+```
+
+
+# AFDW plot
+```{r}
+AFDW_plot <- AFDW %>%
+  ggplot(aes(x = Month, y = AFDW_g_m2, group = 1)) +
+  geom_point(size = 3) +
+  scale_y_continuous(limits = c(0,30))+
+  geom_line(linetype = 2, linewidth = 1) +
+  labs(y = expression(AFDW~(g/m^{2})), x = "") +
+  theme_classic()
+AFDW_plot
+
+Chla_plot <- Chla %>%
+  ggplot(aes(x = Month, y = Chla_mg_m2, group = 1)) +
+  geom_point(size = 3) +
+  scale_y_continuous(limits = c(0,33))+
+  geom_line(linetype = 2, linewidth = 1) +
+  labs(y = expression(Chl-a~(mg/m^{2}))) +
+  theme_classic()
+Chla_plot
+```
+
+# Combining plots
+```{r}
+KA_biomass_trends <- AFDW_plot/Chla_plot
+
+ggsave("plots/main_analysis/KA_biomass_trends.jpg", plot = KA_biomass_trends, height = 6, width = 6, dpi = 300)
+
+ggsave("plots/final_paper/Figure1_inset.jpg", plot = KA_biomass_trends, height = 6, width = 6, dpi = 300)
+```
+
+

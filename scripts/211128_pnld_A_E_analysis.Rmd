@@ -1,0 +1,137 @@
+---
+title: "211128_pnld_A_E_analysis"
+author: "Nick Framsted"
+date: "1/1/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(ggpubr)
+library(plotly)
+library(reshape2)
+library(DescTools)
+
+# changing working directory from /scripts to /tahoe_lab_inc_analysis
+knitr::opts_knit$set(root.dir = '..')
+```
+
+# Importing and Processing data
+```{r, include = FALSE}
+# importing and cleaning up metabolism data from both ambient and enriched incubations
+dat_a <- read_csv("data/211128_pineland_a_e/211128_pnld_ambient_rates.csv")
+
+# selecting only the columns that I need
+dat_a <- dat_a %>%
+  dplyr::select(chamber, rock_SA_m2, total_DW_g_2:nutrient_trt) %>%
+  rename(total_AFDW_g = total_AFDW_final, total_DW_g = total_DW_g_2) # renaming columns of remeasured AFDW data to be the same name as the other experiments now that I no longer need to distinguish between the two sources of AFDW data
+
+dat_e <- read_csv("data/211128_pineland_a_e/211128_pnld_enriched_rates.csv")
+
+# selecting only the columns that I need
+dat_e <- dat_e %>%
+  dplyr::select(chamber, rock_SA_m2, total_DW_g_2:nutrient_trt) %>%
+  rename(total_AFDW_g = total_AFDW_final, total_DW_g = total_DW_g_2) # renaming columns of remeasured AFDW data to be the same name as the other experiments now that I no longer need to distinguish between the two sources of AFDW data
+
+
+# binding the rows of the two dataframes together
+dat <- bind_rows(dat_a, dat_e)
+# adding in nutrient enriched dummy variable column (0 = ambient, 1 = enriched nutrients)
+dat <- dat %>%
+  mutate(nutrients = ifelse(nutrient_trt == "ambient", 0, 1))
+
+# making ER values positive for subsequent log-transformations
+dat <- dat %>%
+  mutate(ER_mg_d = -1 * ER_mg_d, ER_mgO2_d_gAFDW = -1 * ER_mgO2_d_gAFDW, ER_mgO2_d_m2 = -1 * ER_mgO2_d_m2)
+
+write_csv(dat, "data/main_analysis/211128_pnld_A_E_rates.csv")
+
+#View(dat)
+
+```
+
+# Log-normal graphs of metabolic rates
+
+## GPP
+```{r}
+# linear model of log-transformed GPP (biomass-normalized) and temperature
+
+log_GPP_AFDW_mod <- lm(log(GPP_mgO2_d_gAFDW) ~ temp_C*nutrients, dat)
+summary(log_GPP_AFDW_mod)
+
+plot(log_GPP_AFDW_mod)
+###### Model interpretations ######
+
+# interpreting effect size of temperature effect
+exp(coef(log_GPP_AFDW_mod)["temp_C"])
+
+
+GPP_log_log <- dat %>%
+  ggplot(aes(x = temp_C, y = GPP_mgO2_d_gAFDW, color = nutrient_trt)) +
+  scale_y_log10() +
+  geom_point(shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  #scale_color_discrete(name = "Nutrient Treatment")+
+  theme_classic() +
+  labs(title = "Periphyton GPP vs. Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(GPP~(mgO[2]~day^{-1}~gAFDW^{-1})))
+
+GPP_log_log
+```
+
+## ER
+```{r}
+# linear model of log-transformed ER rates (biomass normalized) and temperature
+log_ER_AFDW_mod <- lm(log(ER_mgO2_d_gAFDW) ~ temp_C*nutrients, dat)
+summary(log_ER_AFDW_mod)
+
+plot(log_ER_AFDW_mod)
+
+###### Model interpretations ######
+
+# interpreting effect size of temperature effect
+exp(coef(log_ER_AFDW_mod)["temp_C"])
+
+
+ER_log_log <- dat %>%
+  ggplot(aes(x = temp_C, y = ER_mgO2_d_gAFDW, color = nutrient_trt)) +
+  scale_y_log10() +
+  geom_point(shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  #stat_regline_equation() +
+  theme_classic() +
+  labs(title = "ER response to Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(ER~(mgO[2]~day^{-1}~gAFDW^{-1})))
+
+ER_log_log
+```
+
+
+## NEP
+```{r}
+# linear model of log-transformed NEP (biomass normalized) and temp
+log_NEP_AFDW_mod <- lm(log(NEP_mgO2_d_gAFDW) ~ temp_C*nutrients, dat)
+summary(log_NEP_AFDW_mod)
+
+plot(log_NEP_AFDW_mod)
+
+# no significant predictors in the model
+
+
+NEP_log_log <- dat %>%
+  ggplot(aes(x = temp_C, y = NEP_mgO2_d_gAFDW, color = nutrient_trt)) +
+  scale_y_log10() +
+  geom_point(shape = 19, size = 2) +
+  geom_smooth(method = "lm") +
+  #stat_regline_equation() +
+  theme_classic() +
+  labs(title = "NEP response to Temperature",
+      x = expression('Temperature (\u00B0C)'),
+      y = expression(NEP~(mgO[2]~day^{-1}~gAFDW)))
+
+NEP_log_log
+```

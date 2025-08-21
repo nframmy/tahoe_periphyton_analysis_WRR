@@ -1,0 +1,136 @@
+---
+title: "211128_background_metab"
+author: "Nick Framsted"
+date: "1/2/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(ggpubr)
+library(plotly)
+library(reshape2)
+library(DescTools)
+
+# changing working directory from /scripts to /tahoe_lab_inc_analysis
+knitr::opts_knit$set(root.dir = '..')
+```
+
+# Loading in data
+```{r}
+dat <- read_csv("data/211128_pineland_a_e/211128_background_metab_inc.csv")
+
+
+head(dat)
+
+```
+
+# Calculating Background GPP Rates
+```{r}
+# creating column of average of the 3 DO measurements for each jar
+dat2 <- dat %>%
+  mutate(DO_avg = (DO_1_mg_L + DO_2_mg_L + DO_3_mg_L)/3)
+head(dat2)
+#View(dat2)
+
+# plotting DO data vs. time
+dat2 %>%
+  ggplot(aes(x = time, y = DO_avg, color = jar)) +
+  geom_point() +
+  geom_smooth(method = lm, se = F)
+# looks like jar might be an outlier since DO increased even during the dark incubation
+
+# plotting just GPP section of data
+dat2 %>%
+  filter(time <= hms::as.hms("14:02:00")) %>% # filtering out final DO msmnt to only get GPP
+  ggplot(aes(x = time, y = DO_avg, color = jar)) +
+  geom_point() +
+  geom_smooth(method = lm, se = F)
+
+#### GPP ####
+dat3 <- dat2 %>%
+  filter(time <= hms::as.hms("14:02:00")) %>% # filtering out final DO msmnt to only get GPP
+  group_by(jar) %>%
+  dplyr::summarise(treatment, tank, treatment, DO_diff_mg_L = last(DO_avg) - first(DO_avg), delta_T_days = as.duration(first(time) %--% last(time))/ddays(1)) # taking difference in DO conc. between pre- and post-light exposure and difference in time (in days) to calculate GPP rates
+
+#View(dat3)
+
+# now converting DO concentrations in mg/L to DO mass in mg by multiplying by jar volumes
+dat3 <- dat3 %>%
+  mutate(DO_avg_mass_mg = DO_diff_mg_L * 0.473)
+
+# calculating background GPP rates (in mg O2 per day) for the ambient and enriched water(GPP rates for jars are multiplied by the ratio of water volume of the periphyton chambers:jars to account for the difference in water volume)
+# one mason jar is 0.473L, each periphyton chamber is ~2.75L with a rock inside
+dat_GPP <- dat3 %>%
+  mutate(GPP = DO_avg_mass_mg/delta_T_days * (2.75/.473)) %>%
+  mutate(temp = case_when(
+    tank == 2 ~ 9.5,
+    tank == 1 ~ 12.5,
+    tank == 3 ~ 15.5,
+    tank == 4 ~ 18.5
+  )) %>%# respecifying temperatures to correspond with treatment levels
+  group_by(jar, temp, treatment) %>%
+  summarise(avg_GPP = mean(GPP))
+View(dat_GPP)
+
+dat_GPP %>%
+  ggplot(aes(x = temp, y = avg_GPP, color = treatment)) +
+  geom_point() +
+  geom_label(aes(label = jar))
+```
+
+Background GPP rates range from -28 to 3.7 mgO2/day. This is potentially significant compared to periphyton GPP rates which ranged from 36 to 187 mgO2/day (avg = 85).
+
+# Calculating background ER rates
+```{r}
+# calculating ER rates in jars using second set of DO measurements taken during the dark period (this was done to increase the likelihood of seeing an ER signal by using measurements taken after a greater period of time had elapsed).
+dat_ER <- dat2 %>%
+  filter(time >= hms::as.hms("13:58:00") & time < hms::as.hms("15:23:00") | time >= hms::as.hms("17:00:00")) %>% # filtering out initial DO msmnt to only get ER
+  group_by(jar) %>%
+  summarise(treatment, tank, treatment, DO_diff_mg_L = last(DO_avg) - first(DO_avg), delta_T_days = as.duration(first(time) %--% last(time))/ddays(1)) # taking difference in DO conc. between pre- and post-dark exposure and difference in time (in days) to calculate ER rates
+
+#View(dat_ER)
+
+# now converting DO concentrations in mg/L to DO mass in mg by multiplying by jar volumes
+dat_ER <- dat_ER %>%
+  mutate(DO_avg_mass_mg = DO_diff_mg_L * 0.473)
+
+dat2 %>%
+  filter(time >= hms::as.hms("13:58:00") & time < hms::as.hms("15:23:00") | time >= hms::as.hms("17:00:00")) %>% # filtering out initial DO msmnt to only get ER
+  ggplot(aes(x = time, y = DO_avg, color = jar)) +
+  geom_point() +
+  geom_smooth(method = lm, se = F)
+# looks like jar might be an outlier since DO increased even during the dark incubation
+
+# calculating background ER rates (in mg O2 per day) for the ambient and enriched water(ER rates for jars are multiplied by the ratio of water volume of the periphyton chambers:jars to account for the difference in water volume)
+# one mason jar is 0.473L, each periphyton chamber is ~2.75L with a rock inside
+dat_ER <- dat_ER %>%
+  mutate(ER = DO_avg_mass_mg/delta_T_days * (2.75/.473)) %>%
+  mutate(temp = case_when(
+    tank == 2 ~ 9.5,
+    tank == 1 ~ 12.5,
+    tank == 3 ~ 15.5,
+    tank == 4 ~ 18.5
+  )) %>%# respecifying temperatures to correspond with treatment levels
+  group_by(jar, temp, treatment) %>%
+  summarise(avg_ER = mean(ER))
+View(dat_ER)
+
+dat_ER %>%
+  ggplot(aes(x = temp, y = avg_ER, color = treatment)) +
+  geom_point() +
+  geom_label(aes(label = jar), position = "nudge")
+```
+
+Background ER rates ranged from -6 to 0 mgO2/day. Periphyton ER rates ranged from 6 to 49 mgO2/day (avg = 20.7 mgO2/day).
+
+
+# merging GPP and ER dataframes
+```{r}
+nov_backrnd <- full_join(dat_GPP, dat_ER, by="jar", suffix=c("",".y")) %>%
+  dplyr::select(-ends_with(".y"))
+
+write_csv(nov_backrnd, "data/211128_pineland_a_e/nov_background_rates.csv")
+```
